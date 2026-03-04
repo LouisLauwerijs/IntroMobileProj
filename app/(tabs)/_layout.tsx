@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Stack } from 'expo-router';
 
 export default function TabLayout() {
   return (
@@ -48,5 +49,14 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+  );
+}
+
+export function RootLayout() {
+  return (
+    <Stack>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="book" options={{ headerShown: false }} />
+    </Stack>
   );
 }

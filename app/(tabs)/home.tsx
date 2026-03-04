@@ -3,27 +3,37 @@ import {
   StyleSheet, TextInput, SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 const upcomingMatches = [
   { id: '1', court: 'Court A', time: 'Today, 6:00 PM', players: '3/4', sport: 'Padel' },
-  { id: '2', court: 'Court B', time: 'Tomorrow, 10:00 AM', players: '2/4', sport: 'Tennis' },
+  { id: '2', court: 'Court B', time: 'Tomorrow, 10:00 AM', players: '2/4', sport: 'Padel' },
 ];
 
 const nearbyCourts = [
   { id: '1', name: 'City Padel Club', distance: '0.5 km', available: 3 },
-  { id: '2', name: 'Riverside Courts', distance: '1.2 km', available: 1 },
+  { id: '2', name: 'Riverside Padel', distance: '1.2 km', available: 1 },
   { id: '3', name: 'Central Sports Hub', distance: '2.0 km', available: 5 },
 ];
 
 export default function HomeScreen() {
+  const router = useRouter();
+
+  const quickActions = [
+    { icon: 'add-circle-outline', label: 'New Match', onPress: () => {} },
+    { icon: 'search-outline', label: 'Find Match', onPress: () => {} },
+    { icon: 'calendar-outline', label: 'Book Court', onPress: () => router.push('/book') },
+    { icon: 'trophy-outline', label: 'Rankings', onPress: () => {} },
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
 
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Good morning</Text>
-            <Text style={styles.username}>test</Text>
+            <Text style={styles.greeting}>Good morning 👋</Text>
+            <Text style={styles.username}>Alex</Text>
           </View>
           <TouchableOpacity>
             <Ionicons name="notifications-outline" size={26} color="#333" />
@@ -40,13 +50,8 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.quickActions}>
-          {[
-            { icon: 'add-circle-outline', label: 'New Match' },
-            { icon: 'search-outline', label: 'Find Match' },
-            { icon: 'calendar-outline', label: 'Book Court' },
-            { icon: 'trophy-outline', label: 'Rankings' },
-          ].map((action) => (
-            <TouchableOpacity key={action.label} style={styles.actionButton}>
+          {quickActions.map((action) => (
+            <TouchableOpacity key={action.label} style={styles.actionButton} onPress={action.onPress}>
               <Ionicons name={action.icon as any} size={26} color="#00A86B" />
               <Text style={styles.actionLabel}>{action.label}</Text>
             </TouchableOpacity>
@@ -70,7 +75,7 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>Courts Near You</Text>
         {nearbyCourts.map((court) => (
-          <TouchableOpacity key={court.id} style={styles.courtCard}>
+          <TouchableOpacity key={court.id} style={styles.courtCard} onPress={() => router.push('/book')}>
             <View style={styles.courtIcon}>
               <Ionicons name="tennisball-outline" size={24} color="#00A86B" />
             </View>
