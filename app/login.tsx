@@ -15,7 +15,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
 
   const handleLogin = () => {
-    // Replace this with your real auth logic later
     if (email === 'test@test.com' && password === '1234') {
     } else {
       Alert.alert('Error', 'Invalid credentials');
@@ -43,9 +42,15 @@ export default function LoginScreen() {
         secureTextEntry
       />
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Log In</Text>
+      <TouchableOpacity style={styles.button} onPress={() => router.push('/home')}>
+        <Text style={styles.buttonText}  >Log In</Text>
+
       </TouchableOpacity>
+
+      <TouchableOpacity style={styles.button} onPress={() => router.push('/register')}>
+        <Text style={styles.buttonText}> Register </Text>
+      </TouchableOpacity>
+
     </View>
   );
 }
@@ -60,6 +65,9 @@ const styles = StyleSheet.create({
   button: {
     backgroundColor: '#4F46E5', borderRadius: 8,
     padding: 14, alignItems: 'center',
+    marginBottom: 5
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  registerText: { marginTop: 24, textAlign: 'center', color: '#6b7280', fontSize: 14 },
+  registerLink: { color: '#4F46E5', fontWeight: '600' },
 });

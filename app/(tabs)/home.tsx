@@ -22,8 +22,8 @@ export default function HomeScreen() {
 
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Good morning 👋</Text>
-            <Text style={styles.username}>Alex</Text>
+            <Text style={styles.greeting}>Good morning</Text>
+            <Text style={styles.username}>test</Text>
           </View>
           <TouchableOpacity>
             <Ionicons name="notifications-outline" size={26} color="#333" />
