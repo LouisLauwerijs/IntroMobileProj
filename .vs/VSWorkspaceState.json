@@ -1,0 +1,12 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\.devcontainer",
+    "\\.idea",
+    "\\.idea\\caches",
+    "\\app",
+    "\\assets"
+  ],
+  "SelectedNode": "\\app\\index.tsx",
+  "PreviewInSolutionExplorer": false
+}

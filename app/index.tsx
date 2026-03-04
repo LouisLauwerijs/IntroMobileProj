@@ -1,17 +1,7 @@
-import { Text, View } from "react-native";
+import { Redirect } from 'expo-router';
 
-const Index = () => {
-  return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-      }}
-    >
-      <Text>Edit app/index.tsx to edit this screen.</Text>
-    </View>
-  );
+export default function Index() {
+  const isLoggedIn = true;
+
+  return isLoggedIn ? <Redirect href="/(tabs)/home" /> : <Redirect href="/login" />;
 }
-
-export default Index;
