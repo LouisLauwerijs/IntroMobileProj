@@ -20,10 +20,10 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const quickActions = [
-    { icon: 'add-circle-outline', label: 'New Match', onPress: () => {} },
-    { icon: 'search-outline', label: 'Find Match', onPress: () => {} },
-    { icon: 'calendar-outline', label: 'Book Court', onPress: () => router.push('/book') },
-    { icon: 'trophy-outline', label: 'Rankings', onPress: () => {} },
+    { icon: 'add-circle-outline', label: 'New Match', onPress: () => router.push('/(screens)/newMatch') },
+    { icon: 'search-outline', label: 'Find Match', onPress: () => router.push('/(screens)/findMatch') },
+    { icon: 'calendar-outline', label: 'Book Court', onPress: () => router.push('/(screens)/bookCourt') },
+    { icon: 'trophy-outline', label: 'Rankings', onPress: () => router.push('/(screens)/rankings') },
   ];
 
   return (
