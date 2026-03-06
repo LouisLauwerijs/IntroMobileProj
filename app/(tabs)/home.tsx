@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 
 const upcomingMatches = [
   { id: '1', court: 'Court A', time: 'Today, 6:00 PM', players: '3/4', sport: 'Padel' },
@@ -18,6 +19,7 @@ const nearbyCourts = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState('');
 
   const quickActions = [
     { icon: 'add-circle-outline', label: 'New Match', onPress: () => router.push('/(screens)/newMatch') },
@@ -25,6 +27,12 @@ export default function HomeScreen() {
     { icon: 'calendar-outline', label: 'Book Court', onPress: () => router.push('/(screens)/bookCourt') },
     { icon: 'trophy-outline', label: 'Rankings', onPress: () => router.push('/(screens)/rankings') },
   ];
+
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim().length > 0) {
+      router.push({ pathname: '/(screens)/searchResults', params: { q: searchQuery.trim() } });
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -35,19 +43,28 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>Good morning 👋</Text>
             <Text style={styles.username}>Alex</Text>
           </View>
-          <TouchableOpacity>
-            <Ionicons name="notifications-outline" size={26} color="#333" />
+          {/* Notifications bell — navigates to notifications screen */}
+          <TouchableOpacity onPress={() => router.push('/(screens)/notifications')}>
+            <View>
+              <Ionicons name="notifications-outline" size={26} color="#333" />
+              {/* Unread badge */}
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>3</Text>
+              </View>
+            </View>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.searchBar}>
-          <Ionicons name="search-outline" size={18} color="#999" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search courts, players..."
-            placeholderTextColor="#999"
-          />
-        </View>
+        {/* Search bar — navigates to search results on submit */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => router.push({ pathname: '/(screens)/searchResults', params: { q: '' } })}
+        >
+          <View style={styles.searchBar} pointerEvents="none">
+            <Ionicons name="search-outline" size={18} color="#999" />
+            <Text style={styles.searchPlaceholder}>Search courts, players...</Text>
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.quickActions}>
           {quickActions.map((action) => (
@@ -60,7 +77,12 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>Upcoming Matches</Text>
         {upcomingMatches.map((match) => (
-          <TouchableOpacity key={match.id} style={styles.matchCard}>
+          // Navigates to match detail screen
+          <TouchableOpacity
+            key={match.id}
+            style={styles.matchCard}
+            onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+          >
             <View>
               <Text style={styles.matchCourt}>{match.court}</Text>
               <Text style={styles.matchTime}>{match.time}</Text>
@@ -97,8 +119,38 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 10 },
   greeting: { fontSize: 14, color: '#999' },
   username: { fontSize: 22, fontWeight: 'bold', color: '#333' },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', margin: 16, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+
+  notifBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#E53935',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    margin: 16,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchPlaceholder: { fontSize: 15, color: '#999' },
   searchInput: { flex: 1, fontSize: 15, color: '#333' },
+
   quickActions: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 12, padding: 16, marginBottom: 8 },
   actionButton: { alignItems: 'center', gap: 6 },
   actionLabel: { fontSize: 11, color: '#555', fontWeight: '500' },
