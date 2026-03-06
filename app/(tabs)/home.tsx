@@ -22,10 +22,10 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const quickActions = [
-    { icon: 'add-circle-outline', label: 'New Match', onPress: () => router.push('/(screens)/newMatch') },
-    { icon: 'search-outline', label: 'Find Match', onPress: () => router.push('/(screens)/findMatch') },
-    { icon: 'calendar-outline', label: 'Book Court', onPress: () => router.push('/(screens)/bookCourt') },
-    { icon: 'trophy-outline', label: 'Rankings', onPress: () => router.push('/(screens)/rankings') },
+    { icon: 'add-circle-outline', label: 'Nieuwe match', onPress: () => router.push('/(screens)/newMatch') },
+    { icon: 'search-outline', label: 'Zoek match', onPress: () => router.push('/(screens)/findMatch') },
+    { icon: 'calendar-outline', label: 'Reserveer baan', onPress: () => router.push('/(screens)/bookCourt') },
+    { icon: 'trophy-outline', label: 'Ranglijsten', onPress: () => router.push('/(screens)/rankings') },
   ];
 
   const handleSearchSubmit = () => {
@@ -40,8 +40,10 @@ export default function HomeScreen() {
 
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Good morning 👋</Text>
-            <Text style={styles.username}>Alex</Text>
+            <Text style={styles.greeting}>Goede morgen 👋</Text>
+            {/* TODO username from firebase */}
+            <Text style={styles.username}>Alex</Text> 
+
           </View>
           {/* Notifications bell — navigates to notifications screen */}
           <TouchableOpacity onPress={() => router.push('/(screens)/notifications')}>
@@ -62,7 +64,7 @@ export default function HomeScreen() {
         >
           <View style={styles.searchBar} pointerEvents="none">
             <Ionicons name="search-outline" size={18} color="#999" />
-            <Text style={styles.searchPlaceholder}>Search courts, players...</Text>
+            <Text style={styles.searchPlaceholder}>Zoek naar banen, spelers, ...</Text>
           </View>
         </TouchableOpacity>
 
@@ -75,7 +77,7 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Upcoming Matches</Text>
+        <Text style={styles.sectionTitle}>Komende matches</Text>
         {upcomingMatches.map((match) => (
           // Navigates to match detail screen
           <TouchableOpacity
@@ -95,7 +97,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         ))}
 
-        <Text style={styles.sectionTitle}>Courts Near You</Text>
+        <Text style={styles.sectionTitle}>Banen bij u in de buurt</Text>
         {nearbyCourts.map((court) => (
           <TouchableOpacity key={court.id} style={styles.courtCard} onPress={() => router.push('/book')}>
             <View style={styles.courtIcon}>
@@ -103,9 +105,9 @@ export default function HomeScreen() {
             </View>
             <View style={styles.courtInfo}>
               <Text style={styles.courtName}>{court.name}</Text>
-              <Text style={styles.courtDistance}>{court.distance} away</Text>
+              <Text style={styles.courtDistance}>{court.distance}</Text>
             </View>
-            <Text style={styles.courtAvailable}>{court.available} free</Text>
+            <Text style={styles.courtAvailable}>{court.available} vrij</Text>
           </TouchableOpacity>
         ))}
 
