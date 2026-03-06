@@ -102,6 +102,7 @@ export default function BookScreen() {
       </View>
 
       <Text style={styles.resultsCount}>
+        
         {filtered.length} baan{filtered.length !== 1 ? 'en' : ''} beschikbaar
       </Text>
 
