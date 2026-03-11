@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { auth, signInWithEmailAndPassword } from '../firebase';  // Importeer de juiste functies
+import { auth, signInWithEmailAndPassword } from '../firebase';  
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -22,12 +22,10 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      // Probeer in te loggen met Firebase Authentication
       await signInWithEmailAndPassword(auth, email, password);
       console.log('Ingelogd!');
-      router.push('/home'); // Verwijst naar de homepagina na succesvolle login
+      router.push('/home'); 
     } catch (error: any) {
-      // Als er een fout is, laat een alert zien
       setLoading(false);
       Alert.alert('Error', 'Invalid credentials or user not found');
       console.error(error.message);

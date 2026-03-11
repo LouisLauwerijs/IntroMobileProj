@@ -1,102 +1,74 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ScrollView,
-} from 'react-native';
+import { View, TextInput, Button, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import { auth, firestore, createUserWithEmailAndPassword, addDoc, collection, serverTimestamp } from '../firebase'; // Importeer auth en firestore uit firebase.js
 
 export default function RegisterScreen() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
 
-  const handleRegister = () => {
-    if (!name || !email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
+  const handleRegister = async () => {
+    try {
+      // Maak de gebruiker aan met Firebase Authentication (email/wachtwoord registratie)
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+      // Voeg de gebruiker toe aan de Firestore database in de collectie 'Users'
+      await addDoc(collection(firestore, 'Users'), {
+        name: name,
+        email: email,
+        createdAt: serverTimestamp(), // Voeg de server-side timestamp toe
+      });
+
+      console.log('Gebruiker succesvol geregistreerd!');
+      router.replace('/login'); // Je kunt hier de gebruiker doorsturen naar de login of homepagina
+    } catch (error: any) {
+      setError(error.message);
+      console.error('Fout bij registratie:', error.message);
     }
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
-    Alert.alert('Success', 'Account created!', [
-      { text: 'Log In', onPress: () => router.replace('/login') },
-    ]);
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>Create Account</Text>
-      <Text style={styles.subtitle}>Sign up to get started</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Register</Text>
 
       <TextInput
         style={styles.input}
-        placeholder="Full Name"
+        placeholder="Name"
         value={name}
         onChangeText={setName}
-        autoCapitalize="words"
       />
-
       <TextInput
         style={styles.input}
         placeholder="Email"
         value={email}
         onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
       />
-
       <TextInput
         style={styles.input}
         placeholder="Password"
+        secureTextEntry
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
       />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Confirm Password"
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-        secureTextEntry
-      />
-
-      <TouchableOpacity style={styles.button} onPress={handleRegister}>
-        <Text style={styles.buttonText}>Create Account</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.backToLogin} onPress={() => router.back()}>
-        <Text style={styles.backToLoginText}>
-          Already have an account?{' '}
-          <Text style={styles.backToLoginLink}>Log In</Text>
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
+      <Button title="Register" onPress={handleRegister} />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 15, color: '#6b7280', marginBottom: 32, textAlign: 'center' },
+  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
+  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 32, textAlign: 'center' },
   input: {
     borderWidth: 1, borderColor: '#ccc', borderRadius: 8,
     padding: 12, marginBottom: 16, fontSize: 16,
   },
-  button: {
-    backgroundColor: '#4F46E5', borderRadius: 8,
-    padding: 14, alignItems: 'center', marginTop: 4,
+  error: {
+    color: 'red',
+    marginTop: 10,
+    textAlign: 'center',
   },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  backToLogin: { marginTop: 24, alignItems: 'center' },
-  backToLoginText: { color: '#6b7280', fontSize: 14 },
-  backToLoginLink: { color: '#4F46E5', fontWeight: '600' },
 });
