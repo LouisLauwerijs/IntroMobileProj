@@ -4,15 +4,15 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'; // Voeg createUser toe voor registratie
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore'; // Voor Firestore, en addDoc om gebruikers toe te voegen
 
-// Je Firebase-configuratie
+// Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
 const firebaseConfig = {
-  apiKey: "AIzaSyDFfIQqaQF7rEeYXavHNE41jH4ZRWkFicA",
-  authDomain: "intromobileproject-8fef5.firebaseapp.com",
-  projectId: "intromobileproject-8fef5",
-  storageBucket: "intromobileproject-8fef5.firebasestorage.app",
-  messagingSenderId: "726130052167",
-  appId: "1:726130052167:web:e318dafbe651dabef4b562",
-  measurementId: "G-TS03PNM83V"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);

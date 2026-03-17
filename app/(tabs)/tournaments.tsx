@@ -1,24 +1,15 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, Alert, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { auth } from '../../firebase';
 
 const TABS = ['Rankings', 'Tournaments', 'Leagues'];
 
-const rankings = [
-  { rank: 1, name: 'Roel Maes',      level: '4.5', wins: 32, matches: 40, winRate: 80, change: 'up',   avatar: 'R', points: 1840 },
-  { rank: 2, name: 'Kaat De Smedt', level: '4.5', wins: 28, matches: 36, winRate: 78, change: 'up',   avatar: 'K', points: 1780 },
-  { rank: 3, name: 'Marc Peeters',  level: '4.0', wins: 25, matches: 34, winRate: 74, change: 'same', avatar: 'M', points: 1720 },
-  { rank: 4, name: 'Alex Janssen',  level: '3.5', wins: 18, matches: 24, winRate: 75, change: 'up',   avatar: 'A', points: 1520, isMe: true },
-  { rank: 5, name: 'Tom Vervloet',  level: '3.5', wins: 17, matches: 25, winRate: 68, change: 'down', avatar: 'T', points: 1490 },
-  { rank: 6, name: 'Lisa Bogaert',  level: '3.5', wins: 16, matches: 24, winRate: 67, change: 'down', avatar: 'L', points: 1460 },
-  { rank: 7, name: 'Nina Claeys',   level: '3.0', wins: 14, matches: 22, winRate: 64, change: 'up',   avatar: 'N', points: 1380 },
-  { rank: 8, name: 'Sarah Willems', level: '3.0', wins: 12, matches: 20, winRate: 60, change: 'same', avatar: 'S', points: 1310 },
-];
-
-const tournaments = [
+const INITIAL_TOURNAMENTS = [
   {
     id: '1', name: 'Antwerp Open',
     date: 'Mar 15–16', club: 'City Padel Club',
@@ -39,6 +30,17 @@ const tournaments = [
   },
 ];
 
+const rankings = [
+  { rank: 1, name: 'Roel Maes',      level: '4.5', wins: 32, matches: 40, winRate: 80, change: 'up',   avatar: 'R', points: 1840 },
+  { rank: 2, name: 'Kaat De Smedt', level: '4.5', wins: 28, matches: 36, winRate: 78, change: 'up',   avatar: 'K', points: 1780 },
+  { rank: 3, name: 'Marc Peeters',  level: '4.0', wins: 25, matches: 34, winRate: 74, change: 'same', avatar: 'M', points: 1720 },
+  { rank: 4, name: 'Alex Janssen',  level: '3.5', wins: 18, matches: 24, winRate: 75, change: 'up',   avatar: 'A', points: 1520, isMe: true },
+  { rank: 5, name: 'Tom Vervloet',  level: '3.5', wins: 17, matches: 25, winRate: 68, change: 'down', avatar: 'T', points: 1490 },
+  { rank: 6, name: 'Lisa Bogaert',  level: '3.5', wins: 16, matches: 24, winRate: 67, change: 'down', avatar: 'L', points: 1460 },
+  { rank: 7, name: 'Nina Claeys',   level: '3.0', wins: 14, matches: 22, winRate: 64, change: 'up',   avatar: 'N', points: 1380 },
+  { rank: 8, name: 'Sarah Willems', level: '3.0', wins: 12, matches: 20, winRate: 60, change: 'same', avatar: 'S', points: 1310 },
+];
+
 function RankChange({ change }: { change: string }) {
   if (change === 'up')   return <Ionicons name="arrow-up"   size={11} color="#00A86B" />;
   if (change === 'down') return <Ionicons name="arrow-down" size={11} color="#E53935" />;
@@ -48,7 +50,63 @@ function RankChange({ change }: { change: string }) {
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 export default function TournamentsScreen() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
+  const [tournaments, setTournaments] = useState(INITIAL_TOURNAMENTS);
+
+  const handleRegister = (t: any) => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      if (Platform.OS === 'web') {
+        if (window.confirm('Niet ingelogd\n\nJe moet ingelogd zijn om je in te schrijven. Wil je inloggen?')) {
+          router.push('/login');
+        }
+      } else {
+        Alert.alert(
+          'Niet ingelogd',
+          'Je moet ingelogd zijn om je in te schrijven voor een toernooi.',
+          [
+            { text: 'Annuleren', style: 'cancel' },
+            { text: 'Inloggen', onPress: () => router.push('/login') }
+          ]
+        );
+      }
+      return;
+    }
+
+    const confirmMsg = `Wil je je inschrijven voor ${t.name} bij ${t.club}?`;
+    
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Bevestig inschrijving\n\n${confirmMsg}`)) {
+        processRegistration(t.id);
+      }
+    } else {
+      Alert.alert(
+        'Bevestig inschrijving',
+        confirmMsg,
+        [
+          { text: 'Annuleren', style: 'cancel' },
+          { text: 'Inschrijven', onPress: () => processRegistration(t.id) },
+        ]
+      );
+    }
+  };
+
+  const processRegistration = (id: string) => {
+    setTournaments(prev => prev.map(t => {
+      if (t.id === id && t.spots > 0) {
+        return { ...t, spots: t.spots - 1 };
+      }
+      return t;
+    }));
+    
+    if (Platform.OS === 'web') {
+      window.alert('Succes\n\nJe bent succesvol ingeschreven voor het toernooi!');
+    } else {
+      Alert.alert('Succes', 'Je bent succesvol ingeschreven voor het toernooi!');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -144,7 +202,7 @@ export default function TournamentsScreen() {
         {activeTab === 1 && tournaments.map((t) => (
           <TouchableOpacity key={t.id} style={styles.tournCard} activeOpacity={0.88}>
             {/* Header */}
-            <View style={styles.tournHeader}>
+            <View style={t.status === 'finished' ? [styles.tournHeader, { opacity: 0.6 }] : styles.tournHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.tournName}>{t.name}</Text>
                 <View style={styles.tournMetaRow}>
@@ -163,7 +221,7 @@ export default function TournamentsScreen() {
             </View>
 
             {/* Detail chips */}
-            <View style={styles.tournChips}>
+            <View style={t.status === 'finished' ? [styles.tournChips, { opacity: 0.6 }] : styles.tournChips}>
               {[
                 { icon: 'people-outline',      text: t.format },
                 { icon: 'trending-up-outline', text: `Niveau ${t.level}` },
@@ -198,9 +256,13 @@ export default function TournamentsScreen() {
                 <Text style={styles.tournPriceSub}>/speler</Text>
               </View>
               {t.status === 'open' ? (
-                <TouchableOpacity style={styles.registerBtn}>
-                  <Text style={styles.registerBtnText}>Inschrijven</Text>
-                  <Ionicons name="arrow-forward" size={15} color="#fff" />
+                <TouchableOpacity 
+                  style={[styles.registerBtn, t.spots === 0 && { backgroundColor: '#ccc' }]}
+                  onPress={() => t.spots > 0 && handleRegister(t)}
+                  disabled={t.spots === 0}
+                >
+                  <Text style={styles.registerBtnText}>{t.spots === 0 ? 'Volzet' : 'Inschrijven'}</Text>
+                  {t.spots > 0 && <Ionicons name="arrow-forward" size={15} color="#fff" />}
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity style={styles.resultsBtn}>

@@ -1,15 +1,16 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, Alert, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
+import { auth } from '../../firebase';
 
 const TABS   = ['Open', 'Privé', 'Mijn Matches'];
 const LEVELS = ['Alle niveaus', '1.0–2.0', '2.5–3.0', '3.5–4.0', '4.5+'];
 
-const openMatches = [
+const INITIAL_OPEN_MATCHES = [
   {
     id: '1', club: 'City Padel Club', date: 'Vandaag, 18:00',
     level: '3.0–3.5', price: 18, distance: '0.5 km',
@@ -52,7 +53,7 @@ const openMatches = [
   },
 ];
 
-const myMatches = [
+const INITIAL_MY_MATCHES = [
   {
     id: '1', club: 'City Padel Club', date: 'Vandaag, 18:00',
     result: null, won: null, court: 'Court 3',
@@ -74,6 +75,76 @@ export default function MatchesScreen() {
   const router    = useRouter();
   const [activeTab,   setActiveTab]   = useState(0);
   const [activeLevel, setActiveLevel] = useState(0);
+  const [openMatches, setOpenMatches] = useState(INITIAL_OPEN_MATCHES);
+  const [myMatches, setMyMatches]     = useState(INITIAL_MY_MATCHES);
+
+  const handleJoinMatch = (match: any) => {
+    console.log('handleJoinMatch called for match:', match.id);
+    const user = auth.currentUser;
+    console.log('Current user:', user?.email);
+
+    if (!user) {
+      if (Platform.OS === 'web') {
+        if (window.confirm('Niet ingelogd\n\nJe moet ingelogd zijn om je in te schrijven. Wil je inloggen?')) {
+          router.push('/login');
+        }
+      } else {
+        Alert.alert(
+          'Niet ingelogd',
+          'Je moet ingelogd zijn om je in te schrijven voor een wedstrijd.',
+          [
+            { text: 'Annuleren', style: 'cancel' },
+            { text: 'Inloggen', onPress: () => router.push('/login') }
+          ]
+        );
+      }
+      return;
+    }
+
+    const confirmMsg = `Wil je je inschrijven voor de wedstrijd bij ${match.club} op ${match.date}?`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Bevestig inschrijving\n\n${confirmMsg}`)) {
+        processJoin(match, user);
+      }
+    } else {
+      Alert.alert(
+        'Bevestig inschrijving',
+        confirmMsg,
+        [
+          { text: 'Annuleren', style: 'cancel' },
+          { text: 'Inschrijven', onPress: () => processJoin(match, user) },
+        ]
+      );
+    }
+  };
+
+  const processJoin = (match: any, user: any) => {
+    // Update local state for immediate feedback
+    const updatedMatches = openMatches.map(m => {
+      if (m.id === match.id) {
+        const firstOpenSlotIndex = m.players.findIndex(p => !p.name);
+        if (firstOpenSlotIndex !== -1) {
+          const newPlayers = [...m.players];
+          newPlayers[firstOpenSlotIndex] = {
+            name: user.displayName || user.email?.split('@')[0] || 'Ik',
+            level: '?', // Ideally fetch from user profile
+            avatar: (user.displayName?.[0] || user.email?.[0] || 'U').toUpperCase()
+          };
+          return { ...m, players: newPlayers };
+        }
+      }
+      return m;
+    });
+    
+    setOpenMatches(updatedMatches);
+    
+    if (Platform.OS === 'web') {
+      window.alert('Succes\n\nJe bent succesvol ingeschreven!');
+    } else {
+      Alert.alert('Succes', 'Je bent succesvol ingeschreven!');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -129,7 +200,7 @@ export default function MatchesScreen() {
           const filledSpots = match.players.filter((p) => p.name).length;
           const openSpots   = 4 - filledSpots;
           return (
-            <TouchableOpacity key={match.id} style={styles.card} activeOpacity={0.88}>
+            <View key={match.id} style={styles.card}>
               {/* Card header */}
               <View style={styles.cardHeader}>
                 <View style={{ flex: 1 }}>
@@ -183,12 +254,21 @@ export default function MatchesScreen() {
                       {openSpots} {openSpots === 1 ? 'plek' : 'plekken'} vrij
                     </Text>
                   </View>
-                  <TouchableOpacity style={styles.joinBtn}>
-                    <Text style={styles.joinBtnText}>Inschrijven</Text>
+                  <TouchableOpacity 
+                    style={[styles.joinBtn, openSpots === 0 && { backgroundColor: '#ccc' }]}
+                    onPress={() => {
+                      console.log('Button pressed for match:', match.id);
+                      if (openSpots > 0) handleJoinMatch(match);
+                    }}
+                    disabled={openSpots === 0}
+                  >
+                    <Text style={styles.joinBtnText}>
+                      {openSpots === 0 ? 'Volzet' : 'Inschrijven'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
-            </TouchableOpacity>
+            </View>
           );
         })}
 
