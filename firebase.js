@@ -12,7 +12,8 @@ import {
   orderBy,
   onSnapshot,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  getDoc
 } from 'firebase/firestore';
 
 // Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
@@ -44,5 +45,6 @@ export {
   orderBy,
   onSnapshot,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  getDoc
 };

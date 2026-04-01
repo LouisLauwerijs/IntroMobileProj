@@ -23,7 +23,12 @@ export default function RegisterScreen() {
       });
 
       console.log('Gebruiker succesvol geregistreerd!');
-      router.replace('/login'); // Je kunt hier de gebruiker doorsturen naar de login of homepagina
+
+      // Wacht een beetje (1 seconde) voordat je de gebruiker omleidt naar login
+      setTimeout(() => {
+        router.push('/login'); // Redirect naar de loginpagina
+      }, 1000); // 1000 milliseconden = 1 seconde
+
     } catch (error: any) {
       setError(error.message);
       console.error('Fout bij registratie:', error.message);
@@ -54,6 +59,12 @@ export default function RegisterScreen() {
         onChangeText={setPassword}
       />
       <Button title="Register" onPress={handleRegister} />
+      
+      {/* Knop om handmatig naar de loginpagina te navigeren */}
+      <View style={{ marginTop: 20 }}>
+        <Button title="Back to Login" onPress={() => router.push('/login')} color="#6b7280" />
+      </View>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
