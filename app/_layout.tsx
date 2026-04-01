@@ -20,6 +20,7 @@ export default function RootLayout() {
       <Stack.Screen name="(screens)/faq" />
       <Stack.Screen name="(screens)/privacy" />
       <Stack.Screen name="(screens)/termsAndConditions" />
+      <Stack.Screen name="(screens)/chatDetail" />
       <Stack.Screen name="book" />
       <Stack.Screen name="login" />
       <Stack.Screen name="register" />
