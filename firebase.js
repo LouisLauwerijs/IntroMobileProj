@@ -1,8 +1,19 @@
-// firebase.js
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'; // Voeg createUser toe voor registratie
-import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore'; // Voor Firestore, en addDoc om gebruikers toe te voegen
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'; 
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  serverTimestamp,
+  doc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  updateDoc,
+  arrayUnion
+} from 'firebase/firestore';
 
 // Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
 const firebaseConfig = {
@@ -18,5 +29,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const firestore = getFirestore(app);
-
-export { auth, firestore, createUserWithEmailAndPassword, signInWithEmailAndPassword, addDoc, collection, serverTimestamp };
+console.log('Firebase config:', firebaseConfig);
+export { 
+  auth, 
+  firestore, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  addDoc, 
+  collection, 
+  serverTimestamp,
+  doc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  updateDoc,
+  arrayUnion
+};

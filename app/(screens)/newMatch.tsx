@@ -6,10 +6,19 @@ import {
   StyleSheet,
   SafeAreaView,
   Switch,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
+import { 
+  auth, 
+  firestore, 
+  collection, 
+  addDoc, 
+  serverTimestamp 
+} from '../../firebase';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -50,16 +59,67 @@ export default function NewMatchScreen() {
   const [levelMax, setLevelMax] = useState(4.5);
   const [isMixed, setIsMixed] = useState(false);
   const [isCompetitive, setIsCompetitive] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const [showClubs, setShowClubs] = useState(false);
   const [showDates, setShowDates] = useState(false);
   const [showTimes, setShowTimes] = useState(false);
 
-  const canCreate = selectedClub && selectedDate && selectedTime;
+  const canCreate = selectedClub && selectedDate && selectedTime && !loading;
 
-  const handleCreate = () => {
-    // Will be wired to Firebase later
-    router.back();
+  const handleCreate = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Fout', 'Je moet ingelogd zijn om een wedstrijd aan te maken.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Current user is the first player (Team 1)
+      const creatorPlayer = {
+        id: user.uid,
+        name: user.displayName || user.email?.split('@')[0] || 'Speler',
+        level: '?', // Fetch from user profile in a real app
+        team: 1,
+      };
+
+      // Create 3 empty slots
+      const players = [
+        creatorPlayer,
+        { id: null, name: null, level: null, team: 1 },
+        { id: null, name: null, level: null, team: 2 },
+        { id: null, name: null, level: null, team: 2 },
+      ];
+
+      const matchData = {
+        club: selectedClub,
+        date: selectedDate,
+        time: selectedTime,
+        levelMin: levelMin,
+        levelMax: levelMax,
+        isMixed: isMixed,
+        isCompetitive: isCompetitive,
+        pricePerPlayer: 10, // Hardcoded for prototype
+        distance: '2.4 km', // Hardcoded for prototype
+        status: 'open',
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        playerIds: [user.uid],
+        players: players,
+      };
+
+      await addDoc(collection(firestore, 'matches'), matchData);
+      
+      Alert.alert('Succes', 'Je wedstrijd is aangemaakt!', [
+        { text: 'OK', onPress: () => router.replace('/(tabs)/matches') }
+      ]);
+    } catch (error) {
+      console.error('Error creating match:', error);
+      Alert.alert('Fout', 'Er is iets misgegaan bij het aanmaken van de wedstrijd.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
