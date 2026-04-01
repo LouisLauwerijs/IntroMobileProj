@@ -1,0 +1,17 @@
+mergen
+
+remove hardcoded data
+
+wedstijd aanmaken -> redirect + confirmatiemelding
+
+Prive optie bij wedstrijd aanmaken
+
+fix layout mathces tab
+
+reserveer baan moet dynamische data tonen - geen hardcoded bs
+
+competitie -> moet ranglijst worden + hardcoded data verwijderen
+
+tournaments worden geimplementeerd -> Kobe
+
+profiel niet meer hardcoded
