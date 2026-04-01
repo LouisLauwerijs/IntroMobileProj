@@ -42,6 +42,7 @@ type Match = {
   price: number;
   distance: string;
   players: Player[];
+  playerIds: string[]; // Toegevoegd om te kunnen checken of je al meedoet
   levelMin?: number;
   levelMax?: number;
   isMixed?: boolean;
@@ -90,7 +91,6 @@ export default function MatchesScreen() {
     setError(null);
 
     // Listen to all matches with status 'open', sorted by creation date
-    // Note: If this fails, it might be due to a missing composite index.
     const q = query(
       collection(firestore, 'matches'),
       where('status', '==', 'open'),
@@ -115,6 +115,7 @@ export default function MatchesScreen() {
             avatar: p.name   ? (p.name as string)[0].toUpperCase() : null,
             team:   p.team,
           })),
+          playerIds:     d.playerIds ?? [], // Belangrijk voor checks
           levelMin:      d.levelMin,
           levelMax:      d.levelMax,
           isMixed:       d.isMixed,
@@ -130,13 +131,8 @@ export default function MatchesScreen() {
       setLoading(false);
     }, (err: any) => {
       console.error('Error fetching matches:', err);
-      setError('Er is een fout opgetreden bij het laden van de wedstrijden. Heb je de juiste Firestore-indexen?');
+      setError('Er is een fout opgetreden bij het laden van de wedstrijden.');
       setLoading(false);
-      
-      // Fallback: try without orderBy if index is missing
-      if (err.message?.includes('index')) {
-         Alert.alert('Firestore Index nodig', 'De query heeft een index nodig. Bekijk de console voor de URL.');
-      }
     });
 
     return () => unsubscribe();
@@ -149,7 +145,6 @@ export default function MatchesScreen() {
       return;
     }
 
-    // Listen to matches where current user is a player
     const q = query(
       collection(firestore, 'matches'),
       where('playerIds', 'array-contains', currentUser.uid),
@@ -177,100 +172,22 @@ export default function MatchesScreen() {
     });
 
     return () => unsubscribe();
-  }, [currentUser]); // Now correctly depends on currentUser
+  }, [currentUser]);
 
-  // ── Filtered matches based on level selector ──────────────────────────────
+  // ── Filtered matches ──────────────────────────────
   const getFilteredOpenMatches = () => {
-    if (activeLevel === 0) return openMatches; // Alle niveaus
+    if (activeLevel === 0) return openMatches;
 
     return openMatches.filter(m => {
       if (!m.levelMin || !m.levelMax) return true;
-      const levelLabel = LEVELS[activeLevel]; // e.g., '1.0–2.0'
-      
-      if (levelLabel === '4.5+') {
-        return m.levelMax >= 4.5;
-      }
-      
+      const levelLabel = LEVELS[activeLevel];
+      if (levelLabel === '4.5+') return m.levelMax >= 4.5;
       const [minStr, maxStr] = levelLabel.split('–');
-      const filterMin = parseFloat(minStr);
-      const filterMax = parseFloat(maxStr);
-      
-      // Check if match level range overlaps with filter range
-      return (m.levelMin <= filterMax && m.levelMax >= filterMin);
+      return (m.levelMin <= parseFloat(maxStr) && m.levelMax >= parseFloat(minStr));
     });
   };
 
-  // ── Join match ─────────────────────────────────────────────────────────────
-  const handleJoinMatch = (match: Match) => {
-    if (!currentUser) {
-      Alert.alert(
-        'Niet ingelogd',
-        'Je moet ingelogd zijn om je in te schrijven voor een wedstrijd.',
-        [
-          { text: 'Annuleren', style: 'cancel' },
-          { text: 'Inloggen', onPress: () => router.push('/login') },
-        ]
-      );
-      return;
-    }
-
-    const openSpots = match.players.filter((p) => !p.name).length;
-    if (openSpots === 0) return;
-
-    Alert.alert(
-      'Bevestig inschrijving',
-      `Wil je je inschrijven voor de wedstrijd bij ${match.club} op ${match.date}?`,
-      [
-        { text: 'Annuleren', style: 'cancel' },
-        { text: 'Inschrijven', onPress: () => processJoin(match, currentUser) },
-      ]
-    );
-  };
-
-  const processJoin = async (match: Match, user: any) => {
-    try {
-      // Build the new player object
-      const newPlayer = {
-        id:    user.uid,
-        name:  user.displayName || user.email?.split('@')[0] || 'Speler',
-        level: '?',   // ideally fetch from users/{uid}.level
-        team:  match.players.filter((p) => p.team === 1 && !p.name).length > 0 ? 1 : 2,
-      };
-
-      const matchRef = doc(firestore, 'matches', match.id);
-
-      // Fill the first open slot
-      const updatedPlayers = [...match.players];
-      const firstOpen = updatedPlayers.findIndex((p) => !p.name);
-      if (firstOpen === -1) return;
-
-      updatedPlayers[firstOpen] = {
-        ...updatedPlayers[firstOpen],
-        id:     newPlayer.id,
-        name:   newPlayer.name,
-        level:  newPlayer.level,
-        avatar: newPlayer.name[0].toUpperCase(),
-        team:   newPlayer.team,
-      };
-
-      const isFull = updatedPlayers.every((p) => !!p.name);
-
-      await updateDoc(matchRef, {
-        players:   updatedPlayers,
-        playerIds: arrayUnion(user.uid),
-        status:    isFull ? 'full' : 'open',
-      });
-
-      Alert.alert('Succes', 'Je bent succesvol ingeschreven!');
-    } catch (err) {
-      console.error('Error joining match:', err);
-      Alert.alert('Fout', 'Er is iets misgegaan bij het inschrijven.');
-    }
-  };
-
   const filteredOpenMatches = getFilteredOpenMatches();
-
-  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container}>
@@ -300,19 +217,11 @@ export default function MatchesScreen() {
         ))}
       </View>
 
-      {/* Level filter — Open tab only */}
+      {/* Level filter */}
       {activeTab === 0 && (
-        <ScrollView
-          horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.levelRow}
-          style={styles.levelScroll}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.levelRow} style={styles.levelScroll}>
           {LEVELS.map((l, i) => (
-            <TouchableOpacity
-              key={l}
-              style={[styles.levelChip, activeLevel === i && styles.levelChipActive]}
-              onPress={() => setActiveLevel(i)}
-            >
+            <TouchableOpacity key={l} style={[styles.levelChip, activeLevel === i && styles.levelChipActive]} onPress={() => setActiveLevel(i)}>
               <Text style={[styles.levelText, activeLevel === i && styles.levelTextActive]}>{l}</Text>
             </TouchableOpacity>
           ))}
@@ -326,8 +235,6 @@ export default function MatchesScreen() {
       )}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
-
-        {/* ── OPEN MATCHES ── */}
         {activeTab === 0 && (
           loading ? (
             <ActivityIndicator size="large" color="#00A86B" style={{ marginTop: 40 }} />
@@ -335,16 +242,18 @@ export default function MatchesScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="tennisball-outline" size={48} color="#ccc" />
               <Text style={styles.emptyTitle}>Geen open wedstrijden</Text>
-              <Text style={styles.emptySub}>
-                {activeLevel === 0 ? 'Maak de eerste wedstrijd aan!' : 'Geen wedstrijden op dit niveau.'}
-              </Text>
+              <Text style={styles.emptySub}>Maak de eerste wedstrijd aan!</Text>
             </View>
           ) : (
             filteredOpenMatches.map((match) => {
-              const filledSpots = match.players.filter((p) => p.name).length;
-              const openSpots   = 4 - filledSpots;
+              const openSpots = match.players.filter((p) => !p.name).length;
+              const isParticipant = currentUser && match.playerIds.includes(currentUser.uid);
               return (
-                <View key={match.id} style={styles.card}>
+                <TouchableOpacity 
+                  key={match.id} 
+                  style={styles.card}
+                  onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+                >
                   <View style={styles.cardHeader}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.cardClub}>{match.club}</Text>
@@ -395,158 +304,97 @@ export default function MatchesScreen() {
                           {openSpots} {openSpots === 1 ? 'plek' : 'plekken'} vrij
                         </Text>
                       </View>
-                      <TouchableOpacity
-                        style={[styles.joinBtn, openSpots === 0 && { backgroundColor: '#ccc' }]}
-                        onPress={() => openSpots > 0 && handleJoinMatch(match)}
-                        disabled={openSpots === 0}
-                      >
-                        <Text style={styles.joinBtnText}>
-                          {openSpots === 0 ? 'Volzet' : 'Inschrijven'}
+                      <View style={[styles.joinBtn, isParticipant && { backgroundColor: '#f0faf6', borderWidth: 1, borderColor: '#00A86B' }]}>
+                        <Text style={[styles.joinBtnText, isParticipant && { color: '#00A86B' }]}>
+                          {isParticipant ? 'Bekijken' : (openSpots === 0 ? 'Volzet' : 'Inschrijven')}
                         </Text>
-                      </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })
           )
         )}
-
-        {/* ── PRIVÉ MATCHES ── */}
+        
+        {/* PRIVÉ TAB — Zelfde navigatie toevoegen */}
         {activeTab === 1 && (
           loading ? (
             <ActivityIndicator size="large" color="#00A86B" style={{ marginTop: 40 }} />
-          ) : privateMatches.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="lock-closed-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyTitle}>Geen privéwedstrijden</Text>
-              <Text style={styles.emptySub}>Maak een privéwedstrijd aan en nodig je vrienden uit</Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/(screens)/newMatch')}
-              >
-                <Text style={styles.emptyBtnText}>Privéwedstrijd aanmaken</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            privateMatches.map((match) => {
-              const filledSpots = match.players.filter((p) => p.name).length;
-              return (
-                <View key={match.id} style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardClub}>{match.club}</Text>
-                      <View style={styles.metaRow}>
-                        <Ionicons name="time-outline" size={12} color="#999" />
-                        <Text style={styles.metaText}>{match.date} · {match.time}</Text>
-                      </View>
-                    </View>
-                    <View style={[styles.levelBadge, { borderColor: '#E53935', backgroundColor: '#fdecea' }]}>
-                      <Text style={[styles.levelBadgeText, { color: '#E53935' }]}>PRIVÉ</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.playersGrid}>
-                    {match.players.map((p, i) => (
-                      <View key={i} style={[styles.playerSlot, !p.name && styles.playerSlotOpen]}>
-                        {p.name ? (
-                          <>
-                            <View style={styles.playerAvatar}>
-                              <Text style={styles.playerAvatarText}>{p.avatar}</Text>
-                            </View>
-                            <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text>
-                          </>
-                        ) : (
-                          <>
-                            <View style={styles.playerAvatarOpen}>
-                              <Ionicons name="lock-closed" size={14} color="#ccc" />
-                            </View>
-                            <Text style={styles.playerOpenText}>Privé</Text>
-                          </>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.cardFooter}>
-                    <View>
-                      <Text style={styles.cardPrice}>€{match.price}</Text>
-                      <Text style={styles.cardPriceSub}>/speler</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={[styles.joinBtn, { backgroundColor: '#333' }]}
-                      onPress={() => Alert.alert('Privé Wedstrijd', 'Je hebt een uitnodiging nodig om deel te nemen aan deze wedstrijd.')}
-                    >
-                      <Ionicons name="lock-closed-outline" size={14} color="#fff" style={{ marginRight: 4 }} />
-                      <Text style={styles.joinBtnText}>Besloten</Text>
-                    </TouchableOpacity>
+          ) : privateMatches.map((match) => (
+            <TouchableOpacity 
+              key={match.id} 
+              style={styles.card}
+              onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+            >
+              {/* ... (inhoud van card header etc) ... */}
+              <View style={styles.cardHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardClub}>{match.club}</Text>
+                  <View style={styles.metaRow}>
+                    <Ionicons name="time-outline" size={12} color="#999" />
+                    <Text style={styles.metaText}>{match.date} · {match.time}</Text>
                   </View>
                 </View>
-              );
-            })
-          )
-        )}
-
-        {/* ── MIJN MATCHES ── */}
-        {activeTab === 2 && (
-          !currentUser ? (
-             <View style={styles.emptyState}>
-              <Ionicons name="person-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyTitle}>Niet ingelogd</Text>
-              <Text style={styles.emptySub}>Log in om je wedstrijden te bekijken</Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/login')}
-              >
-                <Text style={styles.emptyBtnText}>Inloggen</Text>
-              </TouchableOpacity>
-            </View>
-          ) : myMatches.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="people-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyTitle}>Nog geen wedstrijden</Text>
-              <Text style={styles.emptySub}>Schrijf je in voor een open wedstrijd</Text>
-            </View>
-          ) : (
-            myMatches.map((match) => (
-              <View key={match.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardClub}>{match.club} · {match.court}</Text>
-                    <View style={styles.metaRow}>
-                      <Ionicons name="time-outline" size={12} color="#999" />
-                      <Text style={styles.metaText}>{match.date}</Text>
-                    </View>
-                  </View>
-
-                  {match.result ? (
-                    <View style={[styles.resultBadge, match.won ? styles.resultWin : styles.resultLoss]}>
-                      <Text style={[styles.resultLabel, { color: match.won ? '#00A86B' : '#E53935' }]}>
-                        {match.won ? 'WIN' : 'LOSS'}
-                      </Text>
-                      <Text style={styles.resultScore}>{match.result}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.upcomingBadge}>
-                      <Ionicons name="time-outline" size={12} color="#4F46E5" />
-                      <Text style={styles.upcomingText}>Gepland</Text>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.myPlayersRow}>
-                  {match.players.map((name, i) => (
-                    <View key={i} style={styles.myPlayer}>
-                      <View style={[styles.myAvatar, i < 2 && styles.myAvatarTeam1]}>
-                        <Text style={styles.myAvatarText}>{name[0]}</Text>
-                      </View>
-                      <Text style={styles.myPlayerName}>{name}</Text>
-                    </View>
-                  ))}
+                <View style={[styles.levelBadge, { borderColor: '#E53935', backgroundColor: '#fdecea' }]}>
+                  <Text style={[styles.levelBadgeText, { color: '#E53935' }]}>PRIVÉ</Text>
                 </View>
               </View>
-            ))
-          )
+
+              <View style={styles.playersGrid}>
+                {match.players.map((p, i) => (
+                  <View key={i} style={[styles.playerSlot, !p.name && styles.playerSlotOpen]}>
+                    {p.name ? (
+                      <><View style={styles.playerAvatar}><Text style={styles.playerAvatarText}>{p.avatar}</Text></View>
+                      <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text></>
+                    ) : (
+                      <><View style={styles.playerAvatarOpen}><Ionicons name="lock-closed" size={14} color="#ccc" /></View>
+                      <Text style={styles.playerOpenText}>Privé</Text></>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.cardFooter}>
+                <View><Text style={styles.cardPrice}>€{match.price}</Text><Text style={styles.cardPriceSub}>/speler</Text></View>
+                <View style={[styles.joinBtn, { backgroundColor: '#333' }]}><Text style={styles.joinBtnText}>Bekijken</Text></View>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+
+        {/* MIJN MATCHES TAB — Ook klikbaar maken */}
+        {activeTab === 2 && (
+          currentUser && myMatches.map((match) => (
+            <TouchableOpacity 
+              key={match.id} 
+              style={styles.card}
+              onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+            >
+              <View style={styles.cardHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardClub}>{match.club} · {match.court}</Text>
+                  <View style={styles.metaRow}><Ionicons name="time-outline" size={12} color="#999" /><Text style={styles.metaText}>{match.date}</Text></View>
+                </View>
+                {match.result ? (
+                  <View style={[styles.resultBadge, match.won ? styles.resultWin : styles.resultLoss]}>
+                    <Text style={[styles.resultLabel, { color: match.won ? '#00A86B' : '#E53935' }]}>{match.won ? 'WIN' : 'LOSS'}</Text>
+                    <Text style={styles.resultScore}>{match.result}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.upcomingBadge}><Ionicons name="time-outline" size={12} color="#4F46E5" /><Text style={styles.upcomingText}>Gepland</Text></View>
+                )}
+              </View>
+              <View style={styles.myPlayersRow}>
+                {match.players.map((name, i) => (
+                  <View key={i} style={styles.myPlayer}>
+                    <View style={[styles.myAvatar, i < 2 && styles.myAvatarTeam1]}><Text style={styles.myAvatarText}>{name[0]}</Text></View>
+                    <Text style={styles.myPlayerName}>{name}</Text>
+                  </View>
+                ))}
+              </View>
+            </TouchableOpacity>
+          ))
         )}
 
         <View style={{ height: 32 }} />

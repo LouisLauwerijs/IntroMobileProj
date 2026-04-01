@@ -1,6 +1,6 @@
-mergen
+-- mergen
 
-remove hardcoded data
+-| remove hardcoded data
 
 wedstijd aanmaken -> redirect + confirmatiemelding
 

@@ -1,37 +1,53 @@
 import { useState } from 'react';
-import { View, TextInput, Button, Text, StyleSheet } from 'react-native';
+import { View, TextInput, Button, Text, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { auth, firestore, createUserWithEmailAndPassword, addDoc, collection, serverTimestamp } from '../firebase'; // Importeer auth en firestore uit firebase.js
+import { 
+  auth, 
+  firestore, 
+  createUserWithEmailAndPassword, 
+  doc, 
+  setDoc, 
+  serverTimestamp 
+} from '../firebase';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
-    try {
-      // Maak de gebruiker aan met Firebase Authentication (email/wachtwoord registratie)
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    if (!name || !email || !password) {
+      Alert.alert('Fout', 'Vul alle velden in.');
+      return;
+    }
 
-      // Voeg de gebruiker toe aan de Firestore database in de collectie 'Users'
-      await addDoc(collection(firestore, 'Users'), {
+    setLoading(true);
+    try {
+      // 1. Maak de gebruiker aan in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // 2. Maak een gebruikersdocument aan in Firestore met de UID als ID
+      await setDoc(doc(firestore, 'users', user.uid), {
+        uid: user.uid,
         name: name,
         email: email,
-        createdAt: serverTimestamp(), // Voeg de server-side timestamp toe
+        level: 2.5, // Standaard startniveau
+        createdAt: serverTimestamp(),
       });
 
-      console.log('Gebruiker succesvol geregistreerd!');
-
-      // Wacht een beetje (1 seconde) voordat je de gebruiker omleidt naar login
-      setTimeout(() => {
-        router.push('/login'); // Redirect naar de loginpagina
-      }, 1000); // 1000 milliseconden = 1 seconde
+      console.log('Gebruiker succesvol geregistreerd in Auth & Firestore!');
+      Alert.alert('Succes', 'Account aangemaakt! Je kunt nu inloggen.', [
+        { text: 'OK', onPress: () => router.push('/login') }
+      ]);
 
     } catch (error: any) {
-      setError(error.message);
       console.error('Fout bij registratie:', error.message);
+      Alert.alert('Fout', error.message);
+    } finally {
+      setLoading(false);
     }
   };
 

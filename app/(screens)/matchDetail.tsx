@@ -6,63 +6,53 @@ import {
   StyleSheet,
   SafeAreaView,
   Image,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { 
+  auth, 
+  firestore, 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  arrayUnion 
+} from '../../firebase';
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-// In production, fetch by match id from params: const { id } = useLocalSearchParams();
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-type MatchPlayer = {
-  id: string;
-  name: string;
-  avatar: string;
-  level: number;
-  isYou?: boolean;
+type Player = {
+  id: string | null;
+  name: string | null;
+  level: number | string | null;
   team: 1 | 2;
+  avatar?: string;
 };
 
-type MatchDetail = {
+type Match = {
   id: string;
-  court: string;
   club: string;
-  location: string;
   date: string;
   time: string;
-  duration: string;
-  sport: string;
-  type: 'Competitief' | 'Vriendschappelijk';
+  levelMin: number;
+  levelMax: number;
   pricePerPlayer: number;
-  players: MatchPlayer[];
-  courtImage: string;
-  notes: string;
-};
-
-const MATCH: MatchDetail = {
-  id: '1',
-  court: 'Court A',
-  club: 'City Padel Club',
-  location: 'Antwerpen Centrum',
-  date: 'Vandaag',
-  time: '18:00',
-  duration: '90 min',
-  sport: 'Padel',
-  type: 'Competitief',
-  pricePerPlayer: 9,
-  courtImage: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=600&q=80',
-  notes: 'Breng je eigen racket mee. Ballen worden voorzien door de club.',
-  players: [
-    { id: '1', name: 'Alex Martens', avatar: 'https://i.pravatar.cc/100?img=11', level: 3.5, isYou: true, team: 1 },
-    { id: '2', name: 'Lars Wouters',  avatar: 'https://i.pravatar.cc/100?img=17', level: 3.5, team: 1 },
-    { id: '3', name: 'Noah Pieters',  avatar: 'https://i.pravatar.cc/100?img=15', level: 5.0, team: 2 },
-    { id: '4', name: 'Open plek',     avatar: '',                                  level: 0,   team: 2 },
-  ],
+  players: Player[];
+  playerIds: string[];
+  createdBy: string;
+  status: string;
+  isMixed: boolean;
+  isCompetitive: boolean;
 };
 
 // ─── Player Tile ──────────────────────────────────────────────────────────────
 
-function PlayerTile({ player }: { player: MatchPlayer }) {
-  const isEmpty = player.name === 'Open plek';
+function PlayerTile({ player }: { player: Player }) {
+  const isEmpty = !player.id;
+  const currentUserId = auth.currentUser?.uid;
+  const isYou = player.id === currentUserId;
 
   return (
     <View style={[styles.playerTile, isEmpty && styles.playerTileEmpty]}>
@@ -71,14 +61,19 @@ function PlayerTile({ player }: { player: MatchPlayer }) {
           <Ionicons name="person-add-outline" size={22} color="#ccc" />
         </View>
       ) : (
-        <Image source={{ uri: player.avatar }} style={styles.playerAvatar} />
+        <Image 
+          source={{ uri: player.avatar || `https://i.pravatar.cc/100?u=${player.id}` }} 
+          style={styles.playerAvatar} 
+        />
       )}
       <Text style={[styles.playerName, isEmpty && { color: '#bbb' }]} numberOfLines={1}>
-        {player.name}{player.isYou ? ' (jij)' : ''}
+        {isEmpty ? 'Open plek' : player.name}{isYou ? ' (jij)' : ''}
       </Text>
       {!isEmpty && (
         <View style={styles.levelChip}>
-          <Text style={styles.levelChipText}>{player.level.toFixed(1)}</Text>
+          <Text style={styles.levelChipText}>
+            {typeof player.level === 'number' ? player.level.toFixed(1) : player.level || '?'}
+          </Text>
         </View>
       )}
     </View>
@@ -89,12 +84,108 @@ function PlayerTile({ player }: { player: MatchPlayer }) {
 
 export default function MatchDetailScreen() {
   const router = useRouter();
-  // const { id } = useLocalSearchParams(); // use to fetch real match
+  const { id } = useLocalSearchParams();
+  
+  const [match, setMatch] = useState<Match | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState(false);
 
-  const match = MATCH;
+  useEffect(() => {
+    fetchMatch();
+  }, [id]);
+
+  const fetchMatch = async () => {
+    if (!id) return;
+    try {
+      const docRef = doc(firestore, 'matches', id as string);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setMatch({ id: docSnap.id, ...docSnap.data() } as Match);
+      } else {
+        Alert.alert('Fout', 'Wedstrijd niet gevonden.');
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error fetching match:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Fout', 'Je moet ingelogd zijn om je in te schrijven.');
+      return;
+    }
+
+    if (!match) return;
+
+    // Check of je al in de match zit
+    if (match.playerIds.includes(user.uid)) {
+      Alert.alert('Info', 'Je zit al in deze wedstrijd!');
+      return;
+    }
+
+    // Check of er nog plek is
+    const emptyIndex = match.players.findIndex(p => !p.id);
+    if (emptyIndex === -1) {
+      Alert.alert('Fout', 'Deze wedstrijd is al vol.');
+      return;
+    }
+
+    setJoining(true);
+    try {
+      // 1. Haal de laatste user info op (voor de zekerheid)
+      const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+      const userData = userDoc.exists() ? userDoc.data() : null;
+      
+      const newPlayer: Player = {
+        id: user.uid,
+        name: userData?.name || user.displayName || 'Speler',
+        level: userData?.level || '?',
+        team: match.players[emptyIndex].team,
+      };
+
+      // 2. Update de lokale players array
+      const updatedPlayers = [...match.players];
+      updatedPlayers[emptyIndex] = newPlayer;
+
+      // 3. Update Firestore
+      const matchRef = doc(firestore, 'matches', match.id);
+      const isNowFull = updatedPlayers.filter(p => !p.id).length === 0;
+
+      await updateDoc(matchRef, {
+        players: updatedPlayers,
+        playerIds: arrayUnion(user.uid),
+        status: isNowFull ? 'full' : 'open'
+      });
+
+      Alert.alert('Succes', 'Je bent ingeschreven!');
+      fetchMatch(); // Refresh data
+
+    } catch (error) {
+      console.error('Error joining match:', error);
+      Alert.alert('Fout', 'Kon niet inschrijven. Probeer het later opnieuw.');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </View>
+    );
+  }
+
+  if (!match) return null;
+
   const team1 = match.players.filter((p) => p.team === 1);
   const team2 = match.players.filter((p) => p.team === 2);
-  const spotsLeft = match.players.filter((p) => p.name === 'Open plek').length;
+  const spotsLeft = match.players.filter((p) => !p.id).length;
+  const isParticipant = auth.currentUser ? match.playerIds.includes(auth.currentUser.uid) : false;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -111,32 +202,17 @@ export default function MatchDetailScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
-        {/* Court Hero */}
-        <View style={styles.heroWrap}>
-          <Image source={{ uri: match.courtImage }} style={styles.heroImage} resizeMode="cover" />
-          <View style={styles.heroOverlay}>
-            <View style={styles.typeBadge}>
-              <Ionicons
-                name={match.type === 'Competitief' ? 'trophy-outline' : 'people-outline'}
-                size={13}
-                color="#fff"
-              />
-              <Text style={styles.typeBadgeText}>{match.type}</Text>
-            </View>
-          </View>
-        </View>
-
         {/* Title block */}
         <View style={styles.titleBlock}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.courtName}>{match.court}</Text>
+            <Text style={styles.courtName}>{match.club}</Text>
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={13} color="#999" />
-              <Text style={styles.locationText}>{match.club} · {match.location}</Text>
+              <Text style={styles.locationText}>{match.club} · Antwerpen</Text>
             </View>
           </View>
           <View style={styles.priceBox}>
-            <Text style={styles.priceValue}>€{match.pricePerPlayer}</Text>
+            <Text style={styles.priceValue}>€{match.pricePerPlayer || 10}</Text>
             <Text style={styles.priceUnit}>/pers</Text>
           </View>
         </View>
@@ -146,10 +222,10 @@ export default function MatchDetailScreen() {
           {[
             { icon: 'calendar-outline', label: match.date },
             { icon: 'time-outline',     label: match.time },
-            { icon: 'timer-outline',    label: match.duration },
-            { icon: 'tennisball-outline', label: match.sport },
-          ].map((chip) => (
-            <View key={chip.label} style={styles.infoChip}>
+            { icon: 'trophy-outline',    label: match.isCompetitive ? 'Competitief' : 'Vriendschappelijk' },
+            { icon: 'tennisball-outline', label: 'Padel' },
+          ].map((chip, idx) => (
+            <View key={idx} style={styles.infoChip}>
               <Ionicons name={chip.icon as any} size={15} color="#00A86B" />
               <Text style={styles.infoChipText}>{chip.label}</Text>
             </View>
@@ -169,70 +245,46 @@ export default function MatchDetailScreen() {
           </View>
 
           <View style={styles.teamsWrap}>
-            {/* Team 1 */}
             <View style={styles.teamCol}>
               <Text style={styles.teamLabel}>Team 1</Text>
-              {team1.map((p) => <PlayerTile key={p.id} player={p} />)}
+              {team1.map((p, idx) => <PlayerTile key={idx} player={p} />)}
             </View>
-
-            {/* VS */}
             <View style={styles.vsCol}>
               <View style={styles.vsCircle}>
                 <Text style={styles.vsText}>VS</Text>
               </View>
             </View>
-
-            {/* Team 2 */}
             <View style={styles.teamCol}>
               <Text style={styles.teamLabel}>Team 2</Text>
-              {team2.map((p) => <PlayerTile key={p.id} player={p} />)}
+              {team2.map((p, idx) => <PlayerTile key={idx} player={p} />)}
             </View>
           </View>
 
-          {/* Player dots progress */}
           <View style={styles.dotsRow}>
             {match.players.map((p, i) => (
               <View
                 key={i}
                 style={[
                   styles.dot,
-                  p.name === 'Open plek' ? styles.dotEmpty : styles.dotFilled,
+                  !p.id ? styles.dotEmpty : styles.dotFilled,
                 ]}
               />
             ))}
             <Text style={styles.dotsLabel}>
-              {match.players.filter((p) => p.name !== 'Open plek').length}/4 spelers
+              {match.players.filter((p) => p.id).length}/4 spelers
             </Text>
           </View>
         </View>
 
-        {/* Notes */}
-        {match.notes ? (
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="information-circle-outline" size={18} color="#00A86B" />
-              <Text style={styles.cardTitle}>Notities</Text>
-            </View>
-            <Text style={styles.notesText}>{match.notes}</Text>
-          </View>
-        ) : null}
-
-        {/* Location card */}
+        {/* Level Box */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Ionicons name="location-outline" size={18} color="#00A86B" />
-            <Text style={styles.cardTitle}>Locatie</Text>
+            <Ionicons name="trending-up-outline" size={18} color="#00A86B" />
+            <Text style={styles.cardTitle}>Vereist Niveau</Text>
           </View>
-          <View style={styles.locationCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.locationCardName}>{match.club}</Text>
-              <Text style={styles.locationCardAddr}>{match.location}</Text>
-            </View>
-            <TouchableOpacity style={styles.directionsBtn}>
-              <Ionicons name="navigate-outline" size={16} color="#00A86B" />
-              <Text style={styles.directionsBtnText}>Route</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.levelText}>
+            Deze wedstrijd is voor spelers met een niveau tussen {match.levelMin.toFixed(1)} en {match.levelMax.toFixed(1)}.
+          </Text>
         </View>
 
         <View style={{ height: 120 }} />
@@ -240,13 +292,34 @@ export default function MatchDetailScreen() {
 
       {/* Bottom CTA */}
       <View style={styles.cta}>
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
-          <Text style={styles.cancelBtnText}>Annuleren</Text>
+        <TouchableOpacity 
+          style={styles.cancelBtn} 
+          onPress={() => router.back()}
+        >
+          <Text style={styles.cancelBtnText}>Terug</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.confirmBtn}>
-          <Text style={styles.confirmBtnText}>Bevestigen</Text>
-          <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-        </TouchableOpacity>
+        
+        {isParticipant ? (
+          <View style={[styles.confirmBtn, { backgroundColor: '#f0faf6', borderWidth: 1, borderColor: '#00A86B' }]}>
+            <Text style={[styles.confirmBtnText, { color: '#00A86B' }]}>Al ingeschreven</Text>
+            <Ionicons name="checkmark-circle" size={18} color="#00A86B" />
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={[styles.confirmBtn, (spotsLeft === 0 || joining) && styles.disabledBtn]} 
+            onPress={handleJoin}
+            disabled={spotsLeft === 0 || joining}
+          >
+            {joining ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <Text style={styles.confirmBtnText}>Inschrijven</Text>
+                <Ionicons name="person-add-outline" size={18} color="#fff" />
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -287,33 +360,13 @@ const styles = StyleSheet.create({
 
   scroll: { paddingBottom: 20 },
 
-  // Hero
-  heroWrap: { marginHorizontal: 16, marginBottom: 12, borderRadius: 16, overflow: 'hidden', height: 180 },
-  heroImage: { width: '100%', height: '100%' },
-  heroOverlay: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  typeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  typeBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-
   // Title
   titleBlock: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginHorizontal: 16,
     marginBottom: 12,
+    marginTop: 10,
   },
   courtName: { fontSize: 22, fontWeight: '800', color: '#1a1a1a', marginBottom: 4 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -429,24 +482,7 @@ const styles = StyleSheet.create({
   dotEmpty: { backgroundColor: '#e0e0e0' },
   dotsLabel: { fontSize: 12, color: '#999', marginLeft: 4, fontWeight: '500' },
 
-  // Notes
-  notesText: { fontSize: 14, color: '#666', lineHeight: 20 },
-
-  // Location
-  locationCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  locationCardName: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
-  locationCardAddr: { fontSize: 12, color: '#999', marginTop: 2 },
-  directionsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderColor: '#00A86B',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  directionsBtnText: { fontSize: 13, fontWeight: '700', color: '#00A86B' },
+  levelText: { fontSize: 14, color: '#666', lineHeight: 20 },
 
   // CTA
   cta: {
@@ -484,4 +520,5 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  disabledBtn: { backgroundColor: '#b2dfce' },
 });

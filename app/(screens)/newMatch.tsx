@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { 
   auth, 
   firestore, 
@@ -69,14 +69,17 @@ export default function NewMatchScreen() {
   const canCreate = selectedClub && selectedDate && selectedTime && !loading;
 
   const handleCreate = async () => {
+    console.log('handleCreate gestart...');
     const user = auth.currentUser;
     if (!user) {
+      console.error('Geen gebruiker gevonden');
       Alert.alert('Fout', 'Je moet ingelogd zijn om een wedstrijd aan te maken.');
       return;
     }
 
     setLoading(true);
     try {
+      console.log('Match data voorbereiden voor gebruiker:', user.uid);
       // Current user is the first player (Team 1)
       const creatorPlayer = {
         id: user.uid,
@@ -111,11 +114,25 @@ export default function NewMatchScreen() {
         players: players,
       };
 
+      console.log('Document toevoegen aan Firestore...');
       await addDoc(collection(firestore, 'matches'), matchData);
+      console.log('Document succesvol toegevoegd!');
       
       Alert.alert('Succes', 'Je wedstrijd is aangemaakt!', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)/matches') }
+        { 
+          text: 'OK', 
+          onPress: () => {
+            console.log('OK ingedrukt, redirecting...');
+            router.back();
+          } 
+        }
       ]);
+
+      // Fallback voor web omdat Alert.alert callbacks soms niet vuren
+      if (typeof window !== 'undefined') {
+        router.back();
+      }
+
     } catch (error) {
       console.error('Error creating match:', error);
       Alert.alert('Fout', 'Er is iets misgegaan bij het aanmaken van de wedstrijd.');
@@ -355,7 +372,6 @@ export default function NewMatchScreen() {
           onPress={handleCreate}
           disabled={!canCreate}
         >
-          <Ionicons name="add-circle-outline" size={20} color="#fff" />
           <Text style={styles.createBtnText}>Wedstrijd Aanmaken</Text>
         </TouchableOpacity>
 
