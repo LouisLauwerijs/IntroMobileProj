@@ -6,30 +6,12 @@ import {
   StyleSheet,
   SafeAreaView,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-
-const USER = {
-  name: 'Alex Martens',
-  email: 'alex.martens@email.com',
-  location: 'Antwerpen, BE',
-  avatar: 'https://i.pravatar.cc/300?img=11',
-  level: 3.5,
-  memberSince: 'March 2023',
-  stats: {
-    matches: 48,
-    wins: 31,
-    courts: 12,
-    winRate: 65,
-  },
-};
-
-const RECENT_MATCHES = [
-  { id: '1', result: 'Win',  score: '6-4, 6-3', opponent: 'Team Rivera', date: '28 Feb', court: 'City Padel Club' },
-  { id: '2', result: 'Loss', score: '4-6, 5-7', opponent: 'Team Dupont', date: '24 Feb', court: 'Riverside Padel' },
-  { id: '3', result: 'Win',  score: '6-2, 7-5', opponent: 'Team Santos', date: '19 Feb', court: 'Central Sports Hub' },
-];
+import { useState, useEffect } from 'react';
+import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
 
 function LevelBar({ level }: { level: number }) {
   const pct = ((level - 0.5) / 6.5) * 100;
@@ -47,8 +29,74 @@ function LevelBar({ level }: { level: number }) {
   );
 }
 
+const RECENT_MATCHES = [
+  { id: '1', result: 'Win',  score: '6-4, 6-3', opponent: 'Team Rivera', date: '28 Feb', court: 'City Padel Club' },
+  { id: '2', result: 'Loss', score: '4-6, 5-7', opponent: 'Team Dupont', date: '24 Feb', court: 'Riverside Padel' },
+  { id: '3', result: 'Win',  score: '6-2, 7-5', opponent: 'Team Santos', date: '19 Feb', court: 'Central Sports Hub' },
+];
+
 export default function ProfileScreen() {
   const router = useRouter();
+  const [userData, setUserData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+          if (userDoc.exists()) {
+            setUserData(userDoc.data());
+          } else {
+            // Document doesn't exist yet, but we have the Auth user
+            setUserData({
+              name: user.displayName || '',
+              email: user.email,
+              level: 2.5,
+              createdAt: { toDate: () => new Date() }
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setUserData(null);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </SafeAreaView>
+    );
+  }
+
+  if (!userData) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text>Niet ingelogd of profiel niet gevonden.</Text>
+        <TouchableOpacity onPress={() => router.push('/login')} style={styles.viewAllBtn}>
+          <Text style={styles.viewAllText}>Inloggen</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // Fallback for missing data
+  const name = userData.name || 'Onbekende Gebruiker';
+  const location = userData.location || 'Locatie onbekend';
+  const avatar = userData.avatar || 'https://i.pravatar.cc/300?img=11';
+  const level = userData.level || 2.5;
+  const createdAt = userData.createdAt?.toDate ? userData.createdAt.toDate() : new Date();
+  const memberSince = createdAt.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
+  const stats = userData.stats || { matches: 0, wins: 0, courts: 0, winRate: 0 };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -72,18 +120,18 @@ export default function ProfileScreen() {
           activeOpacity={0.88}
         >
           <View style={styles.avatarWrapper}>
-            <Image source={{ uri: USER.avatar }} style={styles.avatar} />
+            <Image source={{ uri: avatar }} style={styles.avatar} />
             <View style={styles.avatarEdit}>
               <Ionicons name="camera" size={14} color="#fff" />
             </View>
           </View>
           <View style={styles.identityInfo}>
-            <Text style={styles.userName}>{USER.name}</Text>
+            <Text style={styles.userName}>{name}</Text>
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={13} color="#999" />
-              <Text style={styles.locationText}>{USER.location}</Text>
+              <Text style={styles.locationText}>{location}</Text>
             </View>
-            <Text style={styles.memberSince}>Lid sinds {USER.memberSince}</Text>
+            <Text style={styles.memberSince}>Lid sinds {memberSince}</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color="#ccc" />
         </TouchableOpacity>
@@ -94,10 +142,10 @@ export default function ProfileScreen() {
             <Ionicons name="trending-up-outline" size={18} color="#00A86B" />
             <Text style={styles.cardTitle}>Speelniveau</Text>
             <View style={styles.levelPill}>
-              <Text style={styles.levelPillText}>{USER.level.toFixed(1)}</Text>
+              <Text style={styles.levelPillText}>{level.toFixed(1)}</Text>
             </View>
           </View>
-          <LevelBar level={USER.level} />
+          <LevelBar level={level} />
           <Text style={styles.levelHint}>
             Speel competitieve wedstrijden om je level te verbeteren.
           </Text>
@@ -106,10 +154,10 @@ export default function ProfileScreen() {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           {[
-            { label: 'Wedstrijden', value: USER.stats.matches,        icon: 'tennisball-outline' },
-            { label: 'Gewonnen',    value: USER.stats.wins,           icon: 'trophy-outline' },
-            { label: 'Winratio',    value: `${USER.stats.winRate}%`,  icon: 'stats-chart-outline' },
-            { label: 'Clubs',       value: USER.stats.courts,         icon: 'business-outline' },
+            { label: 'Wedstrijden', value: stats.matches,        icon: 'tennisball-outline' },
+            { label: 'Gewonnen',    value: stats.wins,           icon: 'trophy-outline' },
+            { label: 'Winratio',    value: `${stats.winRate}%`,  icon: 'stats-chart-outline' },
+            { label: 'Clubs',       value: stats.courts,         icon: 'business-outline' },
           ].map((s) => (
             <View key={s.label} style={styles.statBox}>
               <Ionicons name={s.icon as any} size={20} color="#00A86B" style={{ marginBottom: 6 }} />

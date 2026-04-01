@@ -1,6 +1,6 @@
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'; 
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth'; 
 import { 
   getFirestore, 
   collection, 
@@ -13,7 +13,8 @@ import {
   onSnapshot,
   updateDoc,
   arrayUnion,
-  getDoc
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 
 // Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
@@ -36,6 +37,7 @@ export {
   firestore, 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
+  onAuthStateChanged,
   addDoc, 
   collection, 
   serverTimestamp,
@@ -46,5 +48,6 @@ export {
   onSnapshot,
   updateDoc,
   arrayUnion,
-  getDoc
+  getDoc,
+  setDoc
 };

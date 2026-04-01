@@ -1,24 +1,25 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, SafeAreaView, Image, TextInput,
-  Alert,
+  Alert, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { auth, firestore, doc, getDoc, setDoc, onAuthStateChanged } from '../../firebase';
 
-// ─── Initial state ────────────────────────────────────────────────────────────
+// ─── Default state ────────────────────────────────────────────────────────────
 
-const INITIAL = {
-  firstName: 'Alex',
-  lastName: 'Martens',
-  email: 'alex.martens@email.com',
-  phone: '+32 470 12 34 56',
-  location: 'Antwerpen, BE',
-  bio: 'Padel speler sinds 2021. Hou van competitief spelen op weekends.',
+const DEFAULT_FORM = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  location: '',
+  bio: '',
   avatar: 'https://i.pravatar.cc/300?img=11',
   gender: 'Man',
-  birthYear: '1993',
+  birthYear: '',
   hand: 'Rechts',
   position: 'Beide',
   currentPassword: '',
@@ -88,7 +89,7 @@ function ChipSelect({
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-function PersonalTab({ form, setField }: { form: typeof INITIAL; setField: (k: string, v: string) => void }) {
+function PersonalTab({ form, setField }: { form: typeof DEFAULT_FORM; setField: (k: string, v: string) => void }) {
   return (
     <>
       <Field label="Voornaam"    value={form.firstName} onChange={(v) => setField('firstName', v)} />
@@ -115,7 +116,7 @@ function PersonalTab({ form, setField }: { form: typeof INITIAL; setField: (k: s
   );
 }
 
-function PreferencesTab({ form, setField }: { form: typeof INITIAL; setField: (k: string, v: string) => void }) {
+function PreferencesTab({ form, setField }: { form: typeof DEFAULT_FORM; setField: (k: string, v: string) => void }) {
   return (
     <>
       <View style={styles.infoBox}>
@@ -130,7 +131,7 @@ function PreferencesTab({ form, setField }: { form: typeof INITIAL; setField: (k
   );
 }
 
-function PasswordTab({ form, setField }: { form: typeof INITIAL; setField: (k: string, v: string) => void }) {
+function PasswordTab({ form, setField }: { form: typeof DEFAULT_FORM; setField: (k: string, v: string) => void }) {
   return (
     <>
       <View style={styles.infoBox}>
@@ -184,8 +185,65 @@ function InterestsTab({ selected, toggle }: { selected: string[]; toggle: (v: st
 export default function EditProfileScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Persoonlijk');
-  const [form, setFormState] = useState(INITIAL);
-  const [interests, setInterests] = useState<string[]>(['Competitief', 'Weekend speler', 'Gevorderden']);
+  const [form, setFormState] = useState(DEFAULT_FORM);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            // Split name if it exists as a single field
+            let firstName = data.firstName || '';
+            let lastName = data.lastName || '';
+            if (!firstName && !lastName && data.name) {
+              const parts = data.name.split(' ');
+              firstName = parts[0];
+              lastName = parts.slice(1).join(' ');
+            }
+
+            setFormState({
+              ...DEFAULT_FORM,
+              firstName: firstName,
+              lastName: lastName,
+              email: data.email || user.email || '',
+              phone: data.phone || '',
+              location: data.location || '',
+              bio: data.bio || '',
+              avatar: data.avatar || 'https://i.pravatar.cc/300?img=11',
+              gender: data.gender || 'Man',
+              birthYear: data.birthYear || '',
+              hand: data.hand || 'Rechts',
+              position: data.position || 'Beide',
+            });
+            setInterests(data.interests || []);
+          } else {
+            // New user, pre-fill with auth data
+            setFormState({
+              ...DEFAULT_FORM,
+              email: user.email || '',
+              firstName: user.displayName?.split(' ')[0] || '',
+              lastName: user.displayName?.split(' ').slice(1).join(' ') || '',
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          Alert.alert('Fout', 'Kon profielgegevens niet laden.');
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+        router.push('/login');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const setField = (key: string, value: string) =>
     setFormState((prev) => ({ ...prev, [key]: value }));
@@ -195,11 +253,50 @@ export default function EditProfileScreen() {
       prev.includes(val) ? prev.filter((i) => i !== val) : [...prev, val]
     );
 
-  const handleSave = () => {
-    Alert.alert('Opgeslagen', 'Je profiel is bijgewerkt.', [
-      { text: 'OK', onPress: () => router.back() },
-    ]);
+  const handleSave = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Fout', 'Je bent niet ingelogd.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const userRef = doc(firestore, 'users', user.uid);
+      await setDoc(userRef, {
+        firstName: form.firstName,
+        lastName: form.lastName,
+        name: `${form.firstName} ${form.lastName}`.trim(),
+        phone: form.phone,
+        location: form.location,
+        bio: form.bio,
+        gender: form.gender,
+        birthYear: form.birthYear,
+        hand: form.hand,
+        position: form.position,
+        interests: interests,
+        email: form.email,
+        updatedAt: new Date(),
+      }, { merge: true });
+
+      Alert.alert('Opgeslagen', 'Je profiel is bijgewerkt.', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert('Fout', 'Kon profiel niet bijwerken.');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -209,8 +306,8 @@ export default function EditProfileScreen() {
           <Ionicons name="arrow-back" size={22} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Profiel bewerken</Text>
-        <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
-          <Text style={styles.saveBtnText}>Opslaan</Text>
+        <TouchableOpacity onPress={handleSave} style={styles.saveBtn} disabled={saving}>
+          {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.saveBtnText}>Opslaan</Text>}
         </TouchableOpacity>
       </View>
 
@@ -252,11 +349,6 @@ export default function EditProfileScreen() {
         {activeTab === 'Voorkeuren' && <PreferencesTab form={form} setField={setField} />}
         {activeTab === 'Wachtwoord' && <PasswordTab    form={form} setField={setField} />}
         {activeTab === 'Interesses' && <InterestsTab   selected={interests} toggle={toggleInterest} />}
-
-        {/* Save button inside scroll */}
-        <TouchableOpacity style={styles.saveBlock} onPress={handleSave}>
-          <Text style={styles.saveBlockText}>Wijzigingen opslaan</Text>
-        </TouchableOpacity>
 
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -346,10 +438,4 @@ const styles = StyleSheet.create({
   interestChipActive: { backgroundColor: '#00A86B', borderColor: '#00A86B' },
   interestChipText: { fontSize: 13, fontWeight: '600', color: '#555' },
   interestChipTextActive: { color: '#fff' },
-
-  saveBlock: {
-    backgroundColor: '#00A86B', borderRadius: 14,
-    paddingVertical: 15, alignItems: 'center', marginTop: 24,
-  },
-  saveBlockText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

@@ -32,9 +32,7 @@ export default function RegisterScreen() {
       // 2. Maak een gebruikersdocument aan in Firestore met de UID als ID
       await setDoc(doc(firestore, 'users', user.uid), {
         uid: user.uid,
-        name: name,
         email: email,
-        level: 2.5, // Standaard startniveau
         createdAt: serverTimestamp(),
       });
 
@@ -45,11 +43,14 @@ export default function RegisterScreen() {
 
     } catch (error: any) {
       console.error('Fout bij registratie:', error.message);
+      setError(error.message);
       Alert.alert('Fout', error.message);
     } finally {
       setLoading(false);
     }
   };
+
+  const [error, setError] = useState('');
 
   return (
     <View style={styles.container}>
