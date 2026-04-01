@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth'; // Added for listener
 import {
   auth,
   firestore,
@@ -45,6 +46,7 @@ type Match = {
   levelMax?: number;
   isMixed?: boolean;
   isCompetitive?: boolean;
+  isPrivate?: boolean;
   createdBy?: string;
   status?: string;
 };
@@ -65,15 +67,30 @@ export default function MatchesScreen() {
   const router = useRouter();
   const [activeTab,   setActiveTab]   = useState(0);
   const [activeLevel, setActiveLevel] = useState(0);
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
   // Firestore data
-  const [openMatches, setOpenMatches] = useState<Match[]>([]);
-  const [myMatches,   setMyMatches]   = useState<MyMatch[]>([]);
-  const [loading,     setLoading]     = useState(true);
+  const [openMatches,    setOpenMatches]    = useState<Match[]>([]);
+  const [privateMatches, setPrivateMatches] = useState<Match[]>([]);
+  const [myMatches,      setMyMatches]      = useState<MyMatch[]>([]);
+  const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState<string | null>(null);
+
+  // ── Auth state listener ──────────────────────────────────────────────────
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // ── Real-time listener for open matches ──────────────────────────────────
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+
     // Listen to all matches with status 'open', sorted by creation date
+    // Note: If this fails, it might be due to a missing composite index.
     const q = query(
       collection(firestore, 'matches'),
       where('status', '==', 'open'),
@@ -81,10 +98,8 @@ export default function MatchesScreen() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetched: Match[] = snapshot.docs.map((docSnap) => {
+      const fetched = snapshot.docs.map((docSnap) => {
         const d = docSnap.data();
-        // Normalise the players array: Firestore stores full player objects;
-        // open slots are stored as { id: null, name: null, ... }
         return {
           id:       docSnap.id,
           club:     d.club     ?? 'Onbekende club',
@@ -104,15 +119,24 @@ export default function MatchesScreen() {
           levelMax:      d.levelMax,
           isMixed:       d.isMixed,
           isCompetitive: d.isCompetitive,
+          isPrivate:     d.isPrivate ?? false,
           createdBy:     d.createdBy,
           status:        d.status,
         };
       });
-      setOpenMatches(fetched);
+      
+      setOpenMatches(fetched.filter(m => !m.isPrivate));
+      setPrivateMatches(fetched.filter(m => m.isPrivate));
       setLoading(false);
-    }, (err) => {
+    }, (err: any) => {
       console.error('Error fetching matches:', err);
+      setError('Er is een fout opgetreden bij het laden van de wedstrijden. Heb je de juiste Firestore-indexen?');
       setLoading(false);
+      
+      // Fallback: try without orderBy if index is missing
+      if (err.message?.includes('index')) {
+         Alert.alert('Firestore Index nodig', 'De query heeft een index nodig. Bekijk de console voor de URL.');
+      }
     });
 
     return () => unsubscribe();
@@ -120,15 +144,15 @@ export default function MatchesScreen() {
 
   // ── Real-time listener for MY matches ─────────────────────────────────────
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
+    if (!currentUser) {
+      setMyMatches([]);
+      return;
+    }
 
-    // Query matches where the current user's UID appears in the players array
-    // (Firestore array-contains works on the player objects' id field via a
-    //  separate denormalised field — see note in handleJoinMatch below)
+    // Listen to matches where current user is a player
     const q = query(
       collection(firestore, 'matches'),
-      where('playerIds', 'array-contains', user.uid),
+      where('playerIds', 'array-contains', currentUser.uid),
       orderBy('createdAt', 'desc')
     );
 
@@ -153,13 +177,32 @@ export default function MatchesScreen() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [currentUser]); // Now correctly depends on currentUser
+
+  // ── Filtered matches based on level selector ──────────────────────────────
+  const getFilteredOpenMatches = () => {
+    if (activeLevel === 0) return openMatches; // Alle niveaus
+
+    return openMatches.filter(m => {
+      if (!m.levelMin || !m.levelMax) return true;
+      const levelLabel = LEVELS[activeLevel]; // e.g., '1.0–2.0'
+      
+      if (levelLabel === '4.5+') {
+        return m.levelMax >= 4.5;
+      }
+      
+      const [minStr, maxStr] = levelLabel.split('–');
+      const filterMin = parseFloat(minStr);
+      const filterMax = parseFloat(maxStr);
+      
+      // Check if match level range overlaps with filter range
+      return (m.levelMin <= filterMax && m.levelMax >= filterMin);
+    });
+  };
 
   // ── Join match ─────────────────────────────────────────────────────────────
   const handleJoinMatch = (match: Match) => {
-    const user = auth.currentUser;
-
-    if (!user) {
+    if (!currentUser) {
       Alert.alert(
         'Niet ingelogd',
         'Je moet ingelogd zijn om je in te schrijven voor een wedstrijd.',
@@ -179,7 +222,7 @@ export default function MatchesScreen() {
       `Wil je je inschrijven voor de wedstrijd bij ${match.club} op ${match.date}?`,
       [
         { text: 'Annuleren', style: 'cancel' },
-        { text: 'Inschrijven', onPress: () => processJoin(match, user) },
+        { text: 'Inschrijven', onPress: () => processJoin(match, currentUser) },
       ]
     );
   };
@@ -196,8 +239,7 @@ export default function MatchesScreen() {
 
       const matchRef = doc(firestore, 'matches', match.id);
 
-      // Fill the first open slot: replace the first null-player with the real player.
-      // We rebuild the players array locally and write it back.
+      // Fill the first open slot
       const updatedPlayers = [...match.players];
       const firstOpen = updatedPlayers.findIndex((p) => !p.name);
       if (firstOpen === -1) return;
@@ -215,7 +257,6 @@ export default function MatchesScreen() {
 
       await updateDoc(matchRef, {
         players:   updatedPlayers,
-        // playerIds is a flat array of UIDs — needed for 'array-contains' queries
         playerIds: arrayUnion(user.uid),
         status:    isFull ? 'full' : 'open',
       });
@@ -226,6 +267,8 @@ export default function MatchesScreen() {
       Alert.alert('Fout', 'Er is iets misgegaan bij het inschrijven.');
     }
   };
+
+  const filteredOpenMatches = getFilteredOpenMatches();
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -276,25 +319,32 @@ export default function MatchesScreen() {
         </ScrollView>
       )}
 
+      {error && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
 
         {/* ── OPEN MATCHES ── */}
         {activeTab === 0 && (
           loading ? (
             <ActivityIndicator size="large" color="#00A86B" style={{ marginTop: 40 }} />
-          ) : openMatches.length === 0 ? (
+          ) : filteredOpenMatches.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="tennisball-outline" size={48} color="#ccc" />
               <Text style={styles.emptyTitle}>Geen open wedstrijden</Text>
-              <Text style={styles.emptySub}>Maak de eerste wedstrijd aan!</Text>
+              <Text style={styles.emptySub}>
+                {activeLevel === 0 ? 'Maak de eerste wedstrijd aan!' : 'Geen wedstrijden op dit niveau.'}
+              </Text>
             </View>
           ) : (
-            openMatches.map((match) => {
+            filteredOpenMatches.map((match) => {
               const filledSpots = match.players.filter((p) => p.name).length;
               const openSpots   = 4 - filledSpots;
               return (
                 <View key={match.id} style={styles.card}>
-                  {/* Card header */}
                   <View style={styles.cardHeader}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.cardClub}>{match.club}</Text>
@@ -311,7 +361,6 @@ export default function MatchesScreen() {
                     </View>
                   </View>
 
-                  {/* Players grid */}
                   <View style={styles.playersGrid}>
                     {match.players.map((p, i) => (
                       <View key={i} style={[styles.playerSlot, !p.name && styles.playerSlotOpen]}>
@@ -335,7 +384,6 @@ export default function MatchesScreen() {
                     ))}
                   </View>
 
-                  {/* Footer */}
                   <View style={styles.cardFooter}>
                     <View>
                       <Text style={styles.cardPrice}>€{match.price}</Text>
@@ -364,24 +412,96 @@ export default function MatchesScreen() {
           )
         )}
 
-        {/* ── PRIVÉ placeholder ── */}
+        {/* ── PRIVÉ MATCHES ── */}
         {activeTab === 1 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="lock-closed-outline" size={48} color="#ccc" />
-            <Text style={styles.emptyTitle}>Geen privéwedstrijden</Text>
-            <Text style={styles.emptySub}>Maak een privéwedstrijd aan en nodig je vrienden uit</Text>
-            <TouchableOpacity
-              style={styles.emptyBtn}
-              onPress={() => router.push('/(screens)/newMatch')}
-            >
-              <Text style={styles.emptyBtnText}>Privéwedstrijd aanmaken</Text>
-            </TouchableOpacity>
-          </View>
+          loading ? (
+            <ActivityIndicator size="large" color="#00A86B" style={{ marginTop: 40 }} />
+          ) : privateMatches.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="lock-closed-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyTitle}>Geen privéwedstrijden</Text>
+              <Text style={styles.emptySub}>Maak een privéwedstrijd aan en nodig je vrienden uit</Text>
+              <TouchableOpacity
+                style={styles.emptyBtn}
+                onPress={() => router.push('/(screens)/newMatch')}
+              >
+                <Text style={styles.emptyBtnText}>Privéwedstrijd aanmaken</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            privateMatches.map((match) => {
+              const filledSpots = match.players.filter((p) => p.name).length;
+              return (
+                <View key={match.id} style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardClub}>{match.club}</Text>
+                      <View style={styles.metaRow}>
+                        <Ionicons name="time-outline" size={12} color="#999" />
+                        <Text style={styles.metaText}>{match.date} · {match.time}</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.levelBadge, { borderColor: '#E53935', backgroundColor: '#fdecea' }]}>
+                      <Text style={[styles.levelBadgeText, { color: '#E53935' }]}>PRIVÉ</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.playersGrid}>
+                    {match.players.map((p, i) => (
+                      <View key={i} style={[styles.playerSlot, !p.name && styles.playerSlotOpen]}>
+                        {p.name ? (
+                          <>
+                            <View style={styles.playerAvatar}>
+                              <Text style={styles.playerAvatarText}>{p.avatar}</Text>
+                            </View>
+                            <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text>
+                          </>
+                        ) : (
+                          <>
+                            <View style={styles.playerAvatarOpen}>
+                              <Ionicons name="lock-closed" size={14} color="#ccc" />
+                            </View>
+                            <Text style={styles.playerOpenText}>Privé</Text>
+                          </>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+
+                  <View style={styles.cardFooter}>
+                    <View>
+                      <Text style={styles.cardPrice}>€{match.price}</Text>
+                      <Text style={styles.cardPriceSub}>/speler</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.joinBtn, { backgroundColor: '#333' }]}
+                      onPress={() => Alert.alert('Privé Wedstrijd', 'Je hebt een uitnodiging nodig om deel te nemen aan deze wedstrijd.')}
+                    >
+                      <Ionicons name="lock-closed-outline" size={14} color="#fff" style={{ marginRight: 4 }} />
+                      <Text style={styles.joinBtnText}>Besloten</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })
+          )
         )}
 
         {/* ── MIJN MATCHES ── */}
         {activeTab === 2 && (
-          myMatches.length === 0 ? (
+          !currentUser ? (
+             <View style={styles.emptyState}>
+              <Ionicons name="person-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyTitle}>Niet ingelogd</Text>
+              <Text style={styles.emptySub}>Log in om je wedstrijden te bekijken</Text>
+              <TouchableOpacity
+                style={styles.emptyBtn}
+                onPress={() => router.push('/login')}
+              >
+                <Text style={styles.emptyBtnText}>Inloggen</Text>
+              </TouchableOpacity>
+            </View>
+          ) : myMatches.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="people-outline" size={48} color="#ccc" />
               <Text style={styles.emptyTitle}>Nog geen wedstrijden</Text>
@@ -560,4 +680,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24, paddingVertical: 12,
   },
   emptyBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+
+  errorBox: { backgroundColor: '#fdecea', padding: 12, marginHorizontal: 16, borderRadius: 10, marginBottom: 12 },
+  errorText: { color: '#E53935', fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

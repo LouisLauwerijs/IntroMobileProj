@@ -59,6 +59,7 @@ export default function NewMatchScreen() {
   const [levelMax, setLevelMax] = useState(4.5);
   const [isMixed, setIsMixed] = useState(false);
   const [isCompetitive, setIsCompetitive] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [showClubs, setShowClubs] = useState(false);
@@ -100,6 +101,7 @@ export default function NewMatchScreen() {
         levelMax: levelMax,
         isMixed: isMixed,
         isCompetitive: isCompetitive,
+        isPrivate: isPrivate,
         pricePerPlayer: 10, // Hardcoded for prototype
         distance: '2.4 km', // Hardcoded for prototype
         status: 'open',
@@ -312,6 +314,26 @@ export default function NewMatchScreen() {
             <Switch
               value={isCompetitive}
               onValueChange={setIsCompetitive}
+              trackColor={{ false: '#ddd', true: '#00A86B' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <View style={styles.toggleDivider} />
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLeft}>
+              <View style={styles.toggleIcon}>
+                <Ionicons name="lock-closed-outline" size={18} color="#00A86B" />
+              </View>
+              <View>
+                <Text style={styles.toggleLabel}>Privé</Text>
+                <Text style={styles.toggleSub}>Alleen zichtbaar in het Privé tabblad</Text>
+              </View>
+            </View>
+            <Switch
+              value={isPrivate}
+              onValueChange={setIsPrivate}
               trackColor={{ false: '#ddd', true: '#00A86B' }}
               thumbColor="#fff"
             />

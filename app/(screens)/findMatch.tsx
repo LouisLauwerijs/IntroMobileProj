@@ -23,16 +23,17 @@ type Match = {
   players: number; // out of 4
   mixed: boolean;
   competitive: boolean;
+  isPrivate: boolean;
   pricePerPlayer: number;
 };
 
 const ALL_MATCHES: Match[] = [
-  { id: '1', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Vandaag', time: '18:00', levelMin: 2.5, levelMax: 4.0, players: 3, mixed: false, competitive: true, pricePerPlayer: 9 },
-  { id: '2', club: 'Riverside Padel', location: 'Linkeroever', date: 'Vandaag', time: '20:00', levelMin: 1.5, levelMax: 3.0, players: 2, mixed: true, competitive: false, pricePerPlayer: 7 },
-  { id: '3', club: 'Central Sports Hub', location: 'Berchem', date: 'Morgen', time: '09:00', levelMin: 3.5, levelMax: 5.5, players: 1, mixed: false, competitive: true, pricePerPlayer: 8 },
-  { id: '4', club: 'Sportpark Noord', location: 'Merksem', date: 'Morgen', time: '11:00', levelMin: 1.0, levelMax: 2.5, players: 2, mixed: true, competitive: false, pricePerPlayer: 6 },
-  { id: '5', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Morgen', time: '19:00', levelMin: 4.0, levelMax: 6.0, players: 3, mixed: false, competitive: true, pricePerPlayer: 9 },
-  { id: '6', club: 'Riverside Padel', location: 'Linkeroever', date: 'Za 08/03', time: '10:00', levelMin: 2.0, levelMax: 4.0, players: 1, mixed: true, competitive: true, pricePerPlayer: 7 },
+  { id: '1', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Vandaag', time: '18:00', levelMin: 2.5, levelMax: 4.0, players: 3, mixed: false, competitive: true, isPrivate: false, pricePerPlayer: 9 },
+  { id: '2', club: 'Riverside Padel', location: 'Linkeroever', date: 'Vandaag', time: '20:00', levelMin: 1.5, levelMax: 3.0, players: 2, mixed: true, competitive: false, isPrivate: true, pricePerPlayer: 7 },
+  { id: '3', club: 'Central Sports Hub', location: 'Berchem', date: 'Morgen', time: '09:00', levelMin: 3.5, levelMax: 5.5, players: 1, mixed: false, competitive: true, isPrivate: false, pricePerPlayer: 8 },
+  { id: '4', club: 'Sportpark Noord', location: 'Merksem', date: 'Morgen', time: '11:00', levelMin: 1.0, levelMax: 2.5, players: 2, mixed: true, competitive: false, isPrivate: false, pricePerPlayer: 6 },
+  { id: '5', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Morgen', time: '19:00', levelMin: 4.0, levelMax: 6.0, players: 3, mixed: false, competitive: true, isPrivate: true, pricePerPlayer: 9 },
+  { id: '6', club: 'Riverside Padel', location: 'Linkeroever', date: 'Za 08/03', time: '10:00', levelMin: 2.0, levelMax: 4.0, players: 1, mixed: true, competitive: true, isPrivate: false, pricePerPlayer: 7 },
 ];
 
 const DATE_FILTERS = ['Alle', 'Vandaag', 'Morgen', 'Deze week'];
@@ -126,11 +127,14 @@ export default function FindMatchScreen() {
   const [levelFilter, setLevelFilter] = useState('Alle');
   const [mixedOnly, setMixedOnly] = useState(false);
   const [competitiveOnly, setCompetitiveOnly] = useState(false);
+  const [privateOnly, setPrivateOnly] = useState(false);
 
   const filtered = ALL_MATCHES.filter((m) => {
     if (dateFilter !== 'Alle' && m.date !== dateFilter) return false;
     if (mixedOnly && !m.mixed) return false;
     if (competitiveOnly && !m.competitive) return false;
+    if (privateOnly && !m.isPrivate) return false;
+    if (!privateOnly && m.isPrivate) return false; // By default show only public matches
     if (levelFilter !== 'Alle') {
       const [minStr, maxStr] = levelFilter.split('–');
       const min = parseFloat(minStr);
@@ -196,6 +200,13 @@ export default function FindMatchScreen() {
           >
             <Ionicons name="trophy-outline" size={14} color={competitiveOnly ? '#fff' : '#555'} />
             <Text style={[styles.toggleChipText, competitiveOnly && styles.toggleChipTextActive]}>Competitief</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleChip, privateOnly && styles.toggleChipActive]}
+            onPress={() => setPrivateOnly(!privateOnly)}
+          >
+            <Ionicons name="lock-closed-outline" size={14} color={privateOnly ? '#fff' : '#555'} />
+            <Text style={[styles.toggleChipText, privateOnly && styles.toggleChipTextActive]}>Privé</Text>
           </TouchableOpacity>
         </View>
       </View>
