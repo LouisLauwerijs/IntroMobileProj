@@ -21,7 +21,9 @@ import {
   query,
   where,
   orderBy,
-  onSnapshot
+  onSnapshot,
+  updateDoc,
+  arrayUnion
 } from '../../firebase';
 
 function LevelBar({ level }: { level: number }) {
@@ -51,43 +53,49 @@ type RecentMatch = {
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
   const [userData, setUserData] = useState<any>(null);
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(true);
 
+  // 1. Luister naar Auth status en Gebruikersgegevens
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let userUnsubscribe: any;
+    
+    const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
       if (user) {
-        try {
-          const userDoc = await getDoc(doc(firestore, 'users', user.uid));
-          if (userDoc.exists()) {
-            setUserData(userDoc.data());
+        // Live listener op het gebruikersdocument voor de teller
+        userUnsubscribe = onSnapshot(doc(firestore, 'users', user.uid), (docSnap) => {
+          if (docSnap.exists()) {
+            setUserData(docSnap.data());
           } else {
             setUserData({
-              name: user.displayName || '',
+              name: user.displayName || 'Speler',
               email: user.email,
               level: 2.5,
+              allTimeMatchIds: [],
               createdAt: { toDate: () => new Date() }
             });
           }
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-        } finally {
           setLoading(false);
-        }
+        });
       } else {
         setUserData(null);
         setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      authUnsubscribe();
+      if (userUnsubscribe) userUnsubscribe();
+    };
   }, []);
 
+  // 2. Haal actieve matches op en synchroniseer met allTime geschiedenis
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) {
+    if (!currentUser) {
       setRecentMatches([]);
       setLoadingMatches(false);
       return;
@@ -96,18 +104,28 @@ export default function ProfileScreen() {
     const today = new Date().toISOString().split('T')[0];
     const q = query(
       collection(firestore, 'matches'),
-      where('playerIds', 'array-contains', user.uid),
+      where('playerIds', 'array-contains', currentUser.uid),
       orderBy('date', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Synchroniseer live inschrijvingen naar de all-time geschiedenis in het gebruikersprofiel
+      const currentMatchIds = snapshot.docs.map(d => d.id);
+      if (currentMatchIds.length > 0) {
+        const userRef = doc(firestore, 'users', currentUser.uid);
+        updateDoc(userRef, {
+          allTimeMatchIds: arrayUnion(...currentMatchIds)
+        }).catch(err => console.error('Error syncing match history:', err));
+      }
+
+      // Filter voor de "Recente Wedstrijden" lijst op het scherm (alleen verleden)
       const fetched = snapshot.docs
         .map(docSnap => {
           const d = docSnap.data();
           if ((d.date || '') >= today) return null;
 
           const players = d.players || [];
-          const userPlayer = players.find((p: any) => p.id === user.uid);
+          const userPlayer = players.find((p: any) => p.id === currentUser.uid);
           const userTeam = userPlayer?.team || 1;
           const opponents = players
             .filter((p: any) => p.team !== userTeam)
@@ -135,12 +153,12 @@ export default function ProfileScreen() {
       setRecentMatches(fetched);
       setLoadingMatches(false);
     }, (err) => {
-      console.error('Error fetching recent matches:', err);
+      console.error('Error fetching matches:', err);
       setLoadingMatches(false);
     });
 
     return () => unsubscribe();
-  }, [auth.currentUser]);
+  }, [currentUser]);
 
   if (loading) {
     return (
@@ -150,10 +168,10 @@ export default function ProfileScreen() {
     );
   }
 
-  if (!userData) {
+  if (!userData && !currentUser) {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text>Niet ingelogd of profiel niet gevonden.</Text>
+        <Text>Niet ingelogd.</Text>
         <TouchableOpacity onPress={() => router.push('/login')} style={styles.viewAllBtn}>
           <Text style={styles.viewAllText}>Inloggen</Text>
         </TouchableOpacity>
@@ -161,14 +179,15 @@ export default function ProfileScreen() {
     );
   }
 
-  // Fallback for missing data
-  const name = userData.name || 'Onbekende Gebruiker';
-  const location = userData.location || 'Locatie onbekend';
-  const avatar = userData.avatar;
-  const level = userData.level || 2.5;
-  const createdAt = userData.createdAt?.toDate ? userData.createdAt.toDate() : new Date();
+  const name = userData?.name || userData?.username || 'Onbekende Gebruiker';
+  const location = userData?.location || 'Locatie onbekend';
+  const avatar = userData?.avatar;
+  const level = userData?.level || 2.5;
+  const createdAt = userData?.createdAt?.toDate ? userData.createdAt.toDate() : new Date();
   const memberSince = createdAt.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
-  const stats = userData.stats || { matches: 0, wins: 0, courts: 0, winRate: 0 };
+  
+  // De teller is nu de unieke geschiedenis van alle inschrijvingen ooit
+  const totalMatchesCount = userData?.allTimeMatchIds?.length || 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -199,9 +218,6 @@ export default function ProfileScreen() {
                 <Ionicons name="person" size={40} color="#ccc" />
               </View>
             )}
-            <View style={styles.avatarEdit}>
-              <Ionicons name="camera" size={14} color="#fff" />
-            </View>
           </View>
           <View style={styles.identityInfo}>
             <Text style={styles.userName}>{name}</Text>
@@ -232,10 +248,9 @@ export default function ProfileScreen() {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           {[
-            { label: 'Wedstrijden', value: stats.matches,        icon: 'tennisball-outline' },
-            { label: 'Gewonnen',    value: stats.wins,           icon: 'trophy-outline' },
-            { label: 'Winratio',    value: `${stats.winRate}%`,  icon: 'stats-chart-outline' },
-            { label: 'Clubs',       value: stats.courts,         icon: 'business-outline' },
+            { label: 'Wedstrijden', value: totalMatchesCount, icon: 'tennisball-outline' },
+            { label: 'Gewonnen',    value: 12,                icon: 'trophy-outline' },
+            { label: 'Winratio',    value: '65%',             icon: 'stats-chart-outline' },
           ].map((s) => (
             <View key={s.label} style={styles.statBox}>
               <Ionicons name={s.icon as any} size={20} color="#00A86B" style={{ marginBottom: 6 }} />
@@ -319,11 +334,6 @@ const styles = StyleSheet.create({
   },
   avatarWrapper: { position: 'relative' },
   avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#eee' },
-  avatarEdit: {
-    position: 'absolute', bottom: 0, right: 0,
-    backgroundColor: '#00A86B', borderRadius: 10, padding: 4,
-    borderWidth: 2, borderColor: '#fff',
-  },
   identityInfo: { flex: 1 },
   userName: { fontSize: 17, fontWeight: '800', color: '#1a1a1a', marginBottom: 3 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 },

@@ -113,8 +113,14 @@ export default function NewMatchScreen() {
         players: players,
       };
 
-      await addDoc(collection(firestore, 'matches'), matchData);
+      const docRef = await addDoc(collection(firestore, 'matches'), matchData);
       
+      // Update all-time match history for the creator
+      const userRef = doc(firestore, 'users', user.uid);
+      await updateDoc(userRef, {
+        allTimeMatchIds: arrayUnion(docRef.id)
+      }).catch(err => console.error('Error updating creator history:', err));
+
       Alert.alert('Succes', 'Je wedstrijd is aangemaakt!', [
         { 
           text: 'OK', 

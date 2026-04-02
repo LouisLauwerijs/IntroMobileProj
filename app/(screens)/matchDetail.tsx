@@ -164,6 +164,12 @@ export default function MatchDetailScreen() {
         status: isNowFull ? 'full' : 'open'
       });
 
+      // Update all-time match history for the user
+      const userRef = doc(firestore, 'users', user.uid);
+      await updateDoc(userRef, {
+        allTimeMatchIds: arrayUnion(match.id)
+      }).catch(err => console.error('Error updating join history:', err));
+
       Alert.alert('Succes', 'Je bent ingeschreven!');
       fetchMatch();
 
