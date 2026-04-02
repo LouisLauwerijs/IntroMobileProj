@@ -1,13 +1,37 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView, Alert, Platform,
+  StyleSheet, SafeAreaView, Alert, Platform, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { auth } from '../../firebase';
+import {
+  auth,
+  firestore,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  updateDoc,
+  doc,
+  orderBy,
+  arrayUnion,
+  arrayRemove,
+  getDocs,
+} from '../../firebase';
 
 const TABS = ['Rankings', 'Tournaments', 'Leagues'];
+
+const rankings = [
+  { rank: 1, name: 'Roel Maes',      level: '4.5', wins: 32, matches: 40, winRate: 80, change: 'up',   avatar: 'R', points: 1840 },
+  { rank: 2, name: 'Kaat De Smedt', level: '4.5', wins: 28, matches: 36, winRate: 78, change: 'up',   avatar: 'K', points: 1780 },
+  { rank: 3, name: 'Marc Peeters',  level: '4.0', wins: 25, matches: 34, winRate: 74, change: 'same', avatar: 'M', points: 1720 },
+  { rank: 4, name: 'Alex Janssen',  level: '3.5', wins: 18, matches: 24, winRate: 75, change: 'up',   avatar: 'A', points: 1520, isMe: true },
+  { rank: 5, name: 'Tom Vervloet',  level: '3.5', wins: 17, matches: 25, winRate: 68, change: 'down', avatar: 'T', points: 1490 },
+  { rank: 6, name: 'Lisa Bogaert',  level: '3.5', wins: 16, matches: 24, winRate: 67, change: 'down', avatar: 'L', points: 1460 },
+  { rank: 7, name: 'Nina Claeys',   level: '3.0', wins: 14, matches: 22, winRate: 64, change: 'up',   avatar: 'N', points: 1380 },
+  { rank: 8, name: 'Sarah Willems', level: '3.0', wins: 12, matches: 20, winRate: 60, change: 'same', avatar: 'S', points: 1310 },
+];
 
 const INITIAL_TOURNAMENTS = [
   {
@@ -30,17 +54,6 @@ const INITIAL_TOURNAMENTS = [
   },
 ];
 
-const rankings = [
-  { rank: 1, name: 'Roel Maes',      level: '4.5', wins: 32, matches: 40, winRate: 80, change: 'up',   avatar: 'R', points: 1840 },
-  { rank: 2, name: 'Kaat De Smedt', level: '4.5', wins: 28, matches: 36, winRate: 78, change: 'up',   avatar: 'K', points: 1780 },
-  { rank: 3, name: 'Marc Peeters',  level: '4.0', wins: 25, matches: 34, winRate: 74, change: 'same', avatar: 'M', points: 1720 },
-  { rank: 4, name: 'Alex Janssen',  level: '3.5', wins: 18, matches: 24, winRate: 75, change: 'up',   avatar: 'A', points: 1520, isMe: true },
-  { rank: 5, name: 'Tom Vervloet',  level: '3.5', wins: 17, matches: 25, winRate: 68, change: 'down', avatar: 'T', points: 1490 },
-  { rank: 6, name: 'Lisa Bogaert',  level: '3.5', wins: 16, matches: 24, winRate: 67, change: 'down', avatar: 'L', points: 1460 },
-  { rank: 7, name: 'Nina Claeys',   level: '3.0', wins: 14, matches: 22, winRate: 64, change: 'up',   avatar: 'N', points: 1380 },
-  { rank: 8, name: 'Sarah Willems', level: '3.0', wins: 12, matches: 20, winRate: 60, change: 'same', avatar: 'S', points: 1310 },
-];
-
 function RankChange({ change }: { change: string }) {
   if (change === 'up')   return <Ionicons name="arrow-up"   size={11} color="#00A86B" />;
   if (change === 'down') return <Ionicons name="arrow-down" size={11} color="#E53935" />;
@@ -52,12 +65,38 @@ const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 export default function TournamentsScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
-  const [tournaments, setTournaments] = useState(INITIAL_TOURNAMENTS);
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [popupMessage, setPopupMessage] = useState<string | null>(null);
+  const currentUser = auth.currentUser;
 
-  const handleRegister = (t: any) => {
-    const user = auth.currentUser;
+  // Load tournaments from Firestore
+  useEffect(() => {
+    const q = query(
+      collection(firestore, 'tournaments'),
+      orderBy('createdAt', 'desc')
+    );
 
-    if (!user) {
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const fetched = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
+        setTournaments(fetched);
+        setLoading(false);
+      },
+      (error) => {
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleRegister = async (tournament: any) => {
+    if (!currentUser) {
       if (Platform.OS === 'web') {
         if (window.confirm('Niet ingelogd\n\nJe moet ingelogd zijn om je in te schrijven. Wil je inloggen?')) {
           router.push('/login');
@@ -75,36 +114,74 @@ export default function TournamentsScreen() {
       return;
     }
 
-    const confirmMsg = `Wil je je inschrijven voor ${t.name} bij ${t.club}?`;
-    
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Bevestig inschrijving\n\n${confirmMsg}`)) {
-        processRegistration(t.id);
+    const isJoined = tournament.participantIds?.includes(currentUser.uid);
+
+    if (isJoined) {
+      // Handle leaving
+      const confirmMsg = `Wil je je uitschrijven uit ${tournament.name}?`;
+
+      if (Platform.OS === 'web') {
+        if (window.confirm(`Bevestig uitschrijving\n\n${confirmMsg}`)) {
+          processLeave(tournament);
+        }
+      } else {
+        Alert.alert(
+          'Bevestig uitschrijving',
+          confirmMsg,
+          [
+            { text: 'Annuleren', style: 'cancel' },
+            { text: 'Uitschrijven', style: 'destructive', onPress: () => processLeave(tournament) },
+          ]
+        );
       }
     } else {
-      Alert.alert(
-        'Bevestig inschrijving',
-        confirmMsg,
-        [
-          { text: 'Annuleren', style: 'cancel' },
-          { text: 'Inschrijven', onPress: () => processRegistration(t.id) },
-        ]
-      );
+      // Handle joining
+      const confirmMsg = `Wil je je inschrijven voor ${tournament.name} bij ${tournament.club}?`;
+
+      if (Platform.OS === 'web') {
+        if (window.confirm(`Bevestig inschrijving\n\n${confirmMsg}`)) {
+          processJoin(tournament);
+        }
+      } else {
+        Alert.alert(
+          'Bevestig inschrijving',
+          confirmMsg,
+          [
+            { text: 'Annuleren', style: 'cancel' },
+            { text: 'Inschrijven', onPress: () => processJoin(tournament) },
+          ]
+        );
+      }
     }
   };
 
-  const processRegistration = (id: string) => {
-    setTournaments(prev => prev.map(t => {
-      if (t.id === id && t.spots > 0) {
-        return { ...t, spots: t.spots - 1 };
-      }
-      return t;
-    }));
-    
-    if (Platform.OS === 'web') {
-      window.alert('Succes\n\nJe bent succesvol ingeschreven voor het toernooi!');
-    } else {
-      Alert.alert('Succes', 'Je bent succesvol ingeschreven voor het toernooi!');
+  const processJoin = async (tournament: any) => {
+    try {
+      const tournamentRef = doc(firestore, 'tournaments', tournament.id);
+      await updateDoc(tournamentRef, {
+        spots: Math.max(0, tournament.spots - 1),
+        participantIds: arrayUnion(currentUser!.uid),
+      });
+
+      setPopupMessage('Je bent gejoint!');
+      setTimeout(() => setPopupMessage(null), 1500);
+    } catch (error) {
+      Alert.alert('Fout', 'Kon je niet inschrijven. Probeer het later opnieuw.');
+    }
+  };
+
+  const processLeave = async (tournament: any) => {
+    try {
+      const tournamentRef = doc(firestore, 'tournaments', tournament.id);
+      await updateDoc(tournamentRef, {
+        spots: tournament.spots + 1,
+        participantIds: arrayRemove(currentUser!.uid),
+      });
+
+      setPopupMessage('Je bent uitgeschreven!');
+      setTimeout(() => setPopupMessage(null), 1500);
+    } catch (error) {
+      Alert.alert('Fout', 'Kon je niet uitschrijven. Probeer het later opnieuw.');
     }
   };
 
@@ -113,6 +190,12 @@ export default function TournamentsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Competitie</Text>
+        <TouchableOpacity
+          style={styles.createBtn}
+          onPress={() => router.push('/(screens)/createTournament')}
+        >
+          <Ionicons name="add" size={20} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {/* Tabs */}
@@ -127,6 +210,13 @@ export default function TournamentsScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Popup Notification */}
+      {popupMessage && (
+        <View style={styles.popup}>
+          <Text style={styles.popupText}>{popupMessage}</Text>
+        </View>
+      )}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
@@ -199,8 +289,28 @@ export default function TournamentsScreen() {
         )}
 
         {/* ── TOURNAMENTS ── */}
-        {activeTab === 1 && tournaments.map((t) => (
-          <TouchableOpacity key={t.id} style={styles.tournCard} activeOpacity={0.88}>
+        {activeTab === 1 && (
+          <>
+            {loading ? (
+              <View style={styles.centerLoader}>
+                <ActivityIndicator size="large" color="#00A86B" />
+              </View>
+            ) : tournaments.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="trophy-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyTitle}>Geen toernooien beschikbaar</Text>
+                <Text style={styles.emptySub}>Er zijn momenteel geen toernooien gepland.</Text>
+                <TouchableOpacity
+                  style={styles.createNewBtn}
+                  onPress={() => router.push('/(screens)/createTournament')}
+                >
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={styles.createNewBtnText}>Maak een toernooi aan</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              tournaments.map((t) => (
+                <TouchableOpacity key={t.id} style={styles.tournCard} activeOpacity={0.88}>
             {/* Header */}
             <View style={t.status === 'finished' ? [styles.tournHeader, { opacity: 0.6 }] : styles.tournHeader}>
               <View style={{ flex: 1 }}>
@@ -257,12 +367,26 @@ export default function TournamentsScreen() {
               </View>
               {t.status === 'open' ? (
                 <TouchableOpacity 
-                  style={[styles.registerBtn, t.spots === 0 && { backgroundColor: '#ccc' }]}
+                  style={[
+                    styles.registerBtn, 
+                    t.spots === 0 && { backgroundColor: '#ccc' },
+                    t.participantIds?.includes(currentUser?.uid) && styles.leaveBtn
+                  ]}
                   onPress={() => t.spots > 0 && handleRegister(t)}
                   disabled={t.spots === 0}
                 >
-                  <Text style={styles.registerBtnText}>{t.spots === 0 ? 'Volzet' : 'Inschrijven'}</Text>
-                  {t.spots > 0 && <Ionicons name="arrow-forward" size={15} color="#fff" />}
+                  <Text style={[
+                    styles.registerBtnText,
+                    t.participantIds?.includes(currentUser?.uid) && styles.leaveBtnText
+                  ]}>
+                    {t.spots === 0 ? 'Volzet' : 
+                     t.participantIds?.includes(currentUser?.uid) ? 'Verlaten' : 'Inschrijven'}
+                  </Text>
+                  {t.spots > 0 && <Ionicons 
+                    name={t.participantIds?.includes(currentUser?.uid) ? "close" : "arrow-forward"} 
+                    size={15} 
+                    color={t.participantIds?.includes(currentUser?.uid) ? "#fff" : "#fff"} 
+                  />}
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity style={styles.resultsBtn}>
@@ -270,8 +394,11 @@ export default function TournamentsScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          </TouchableOpacity>
-        ))}
+            </TouchableOpacity>
+              ))
+            )}
+          </>
+        )}
 
         {/* ── LEAGUES placeholder ── */}
         {activeTab === 2 && (
@@ -291,8 +418,61 @@ export default function TournamentsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
 
-  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  header: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16, 
+    paddingTop: 16, 
+    paddingBottom: 8 
+  },
   title: { fontSize: 24, fontWeight: '900', color: '#1a1a1a' },
+  createBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#00A86B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  centerLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 40,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+  },
+  emptySub: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 4,
+  },
+  createNewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#00A86B',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 16,
+    gap: 6,
+  },
+  createNewBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 
   tabsRow: {
     flexDirection: 'row', marginHorizontal: 16,
@@ -405,6 +585,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingVertical: 11,
   },
   resultsBtnText: { fontSize: 14, fontWeight: '700', color: '#999' },
+
+  // Leave button styles
+  leaveBtn: { backgroundColor: '#E53935' },
+  leaveBtnText: { color: '#fff' },
+
+  // Popup notification
+  popup: {
+    position: 'absolute' as any,
+    top: 100,
+    left: 16,
+    right: 16,
+    backgroundColor: '#00A86B',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  popupText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
 
   emptyState: { alignItems: 'center', paddingVertical: 60, gap: 10 },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: '#999' },
