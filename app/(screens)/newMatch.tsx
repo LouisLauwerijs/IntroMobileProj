@@ -79,7 +79,6 @@ export default function NewMatchScreen() {
 
     setLoading(true);
     try {
-      console.log('Match data voorbereiden voor gebruiker:', user.uid);
       // Current user is the first player (Team 1)
       const creatorPlayer = {
         id: user.uid,
@@ -114,15 +113,12 @@ export default function NewMatchScreen() {
         players: players,
       };
 
-      console.log('Document toevoegen aan Firestore...');
       await addDoc(collection(firestore, 'matches'), matchData);
-      console.log('Document succesvol toegevoegd!');
       
       Alert.alert('Succes', 'Je wedstrijd is aangemaakt!', [
         { 
           text: 'OK', 
           onPress: () => {
-            console.log('OK ingedrukt, redirecting...');
             router.back();
           } 
         }
@@ -134,7 +130,6 @@ export default function NewMatchScreen() {
       }
 
     } catch (error) {
-      console.error('Error creating match:', error);
       Alert.alert('Fout', 'Er is iets misgegaan bij het aanmaken van de wedstrijd.');
     } finally {
       setLoading(false);
