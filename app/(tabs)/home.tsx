@@ -4,7 +4,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
 
 const upcomingMatches = [
   { id: '1', court: 'Court A', time: 'Today, 6:00 PM', players: '3/4', sport: 'Padel' },
@@ -20,18 +21,32 @@ const nearbyCourts = [
 export default function HomeScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
+  const [userName, setUserName] = useState('Speler');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setUserName(data.firstName || data.name?.split(' ')[0] || user.displayName?.split(' ')[0] || 'Speler');
+          } else {
+            setUserName(user.displayName?.split(' ')[0] || 'Speler');
+          }
+        } catch (error) {
+          console.error('Error fetching user name:', error);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const quickActions = [
     { icon: 'add-circle-outline', label: 'Nieuwe match', onPress: () => router.push('/(screens)/newMatch') },
     { icon: 'search-outline', label: 'Zoek match', onPress: () => router.push('/(screens)/findMatch') },
     { icon: 'trophy-outline', label: 'Ranglijsten', onPress: () => router.push('/(screens)/rankings') },
   ];
-
-  const handleSearchSubmit = () => {
-    if (searchQuery.trim().length > 0) {
-      router.push({ pathname: '/(screens)/searchResults', params: { q: searchQuery.trim() } });
-    }
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -40,15 +55,11 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Goede morgen 👋</Text>
-            {/* TODO username from firebase */}
-            <Text style={styles.username}>Alex</Text> 
-
+            <Text style={styles.username}>{userName}</Text> 
           </View>
-          {/* Notifications bell — navigates to notifications screen */}
           <TouchableOpacity onPress={() => router.push('/(screens)/notifications')}>
             <View>
               <Ionicons name="notifications-outline" size={26} color="#333" />
-              {/* Unread badge */}
               <View style={styles.notifBadge}>
                 <Text style={styles.notifBadgeText}>3</Text>
               </View>
@@ -56,7 +67,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Search bar — navigates to search results on submit */}
         <TouchableOpacity
           activeOpacity={1}
           onPress={() => router.push({ pathname: '/(screens)/searchResults', params: { q: '' } })}
@@ -78,7 +88,6 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>Komende matches</Text>
         {upcomingMatches.map((match) => (
-          // Navigates to match detail screen
           <TouchableOpacity
             key={match.id}
             style={styles.matchCard}
