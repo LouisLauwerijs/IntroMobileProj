@@ -1,22 +1,21 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, SafeAreaView, Image, Switch,
+  ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-
-const USER = {
-  name: 'Alex Martens',
-  email: 'alex.martens@email.com',
-  avatar: 'https://i.pravatar.cc/300?img=11',
-  level: 3.5,
-};
+import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
+import { signOut } from 'firebase/auth';
 
 type SettingRow = {
   icon: string;
   label: string;
   value?: string;
+  onPress?: () => void;
   route?: string;
   toggle?: boolean;
   toggleKey?: string;
@@ -28,12 +27,70 @@ type Section = { title: string; rows: SettingRow[] };
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const [userData, setUserData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [toggles, setToggles] = useState<Record<string, boolean>>({
     notifications: true,
     matchInvites: true,
     locationServices: false,
     darkMode: false,
   });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+          if (userDoc.exists()) {
+            setUserData(userDoc.data());
+          } else {
+            setUserData({
+              name: user.displayName || 'Gebruiker',
+              email: user.email,
+              level: 2.5,
+              avatar: '',
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching user data in settings:', error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setUserData(null);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    console.log('Logout button pressed');
+    
+    const performLogout = async () => {
+      try {
+        console.log('Performing Firebase signOut...');
+        await signOut(auth);
+        console.log('SignOut successful, redirecting...');
+        router.replace('/login');
+      } catch (error) {
+        console.error('Error signing out:', error);
+        Alert.alert('Fout', 'Er is iets misgegaan bij het uitloggen.');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Weet je zeker dat je wilt uitloggen?')) {
+        await performLogout();
+      }
+    } else {
+      Alert.alert('Uitloggen', 'Weet je zeker dat je wilt uitloggen?', [
+        { text: 'Annuleren', style: 'cancel' },
+        { text: 'Uitloggen', style: 'destructive', onPress: performLogout },
+      ]);
+    }
+  };
 
   const flip = (key: string) =>
     setToggles((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -56,7 +113,7 @@ export default function SettingsScreen() {
     {
       title: 'Locatie',
       rows: [
-        { icon: 'location-outline',   label: 'Standaard locatie',  value: 'Antwerpen',  route: '/(screens)/defaultLocation' },
+        { icon: 'location-outline',   label: 'Standaard locatie',  value: userData?.location || 'Antwerpen',  route: '/(screens)/defaultLocation' },
         { icon: 'navigate-outline',   label: 'Locatieservices',    toggle: true, toggleKey: 'locationServices' },
       ],
     },
@@ -71,11 +128,24 @@ export default function SettingsScreen() {
     {
       title: 'Sessie',
       rows: [
-        { icon: 'log-out-outline', label: 'Uitloggen', destructive: true, color: '#E53935', route: '/login' },
+        { icon: 'log-out-outline', label: 'Uitloggen', destructive: true, color: '#E53935', onPress: handleLogout },
         { icon: 'trash-outline',   label: 'Account verwijderen', destructive: true, color: '#E53935' },
       ],
     },
   ];
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </SafeAreaView>
+    );
+  }
+
+  const name = userData?.name || 'Onbekende Gebruiker';
+  const email = userData?.email || '';
+  const avatar = userData?.avatar;
+  const level = userData?.level || 2.5;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -96,13 +166,19 @@ export default function SettingsScreen() {
           onPress={() => router.push('/(screens)/editProfile')}
           activeOpacity={0.85}
         >
-          <Image source={{ uri: USER.avatar }} style={styles.avatar} />
+          {avatar ? (
+            <Image source={{ uri: avatar }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="person" size={24} color="#ccc" />
+            </View>
+          )}
           <View style={styles.identityInfo}>
-            <Text style={styles.identityName}>{USER.name}</Text>
-            <Text style={styles.identityEmail}>{USER.email}</Text>
+            <Text style={styles.identityName}>{name}</Text>
+            <Text style={styles.identityEmail}>{email}</Text>
           </View>
           <View style={styles.levelChip}>
-            <Text style={styles.levelChipText}>{USER.level.toFixed(1)}</Text>
+            <Text style={styles.levelChipText}>{level.toFixed(1)}</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color="#ccc" />
         </TouchableOpacity>
@@ -118,8 +194,11 @@ export default function SettingsScreen() {
                   style={[styles.row, idx < section.rows.length - 1 && styles.rowBorder]}
                   activeOpacity={row.toggle ? 1 : 0.7}
                   onPress={() => {
-                    if (row.toggle) return;
-                    if (row.route) router.push(row.route as any);
+                    if (row.onPress) {
+                      row.onPress();
+                    } else if (row.route) {
+                      router.push(row.route as any);
+                    }
                   }}
                 >
                   <View style={[styles.iconWrap, { backgroundColor: row.destructive ? '#fdecea' : '#e8f8f2' }]}>

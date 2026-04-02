@@ -16,4 +16,6 @@ competitie -> moet ranglijst worden + hardcoded data verwijderen
 
 tournaments worden geimplementeerd -> Kobe
 
-✓ profiel niet meer hardcoded
+half ✓ profiel niet meer hardcoded
+
+Manier van resultaten van match ingeven implementeren
