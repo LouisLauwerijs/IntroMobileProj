@@ -11,7 +11,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
+import { 
+  auth, 
+  firestore, 
+  doc, 
+  getDoc, 
+  onAuthStateChanged,
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot
+} from '../../firebase';
 
 function LevelBar({ level }: { level: number }) {
   const pct = ((level - 0.5) / 6.5) * 100;
@@ -29,16 +40,21 @@ function LevelBar({ level }: { level: number }) {
   );
 }
 
-const RECENT_MATCHES = [
-  { id: '1', result: 'Win',  score: '6-4, 6-3', opponent: 'Team Rivera', date: '28 Feb', court: 'City Padel Club' },
-  { id: '2', result: 'Loss', score: '4-6, 5-7', opponent: 'Team Dupont', date: '24 Feb', court: 'Riverside Padel' },
-  { id: '3', result: 'Win',  score: '6-2, 7-5', opponent: 'Team Santos', date: '19 Feb', court: 'Central Sports Hub' },
-];
+type RecentMatch = {
+  id: string;
+  result: 'Win' | 'Loss' | 'Draw';
+  score: string;
+  opponent: string;
+  date: string;
+  court: string;
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [userData, setUserData] = useState<any>(null);
+  const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMatches, setLoadingMatches] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -48,7 +64,6 @@ export default function ProfileScreen() {
           if (userDoc.exists()) {
             setUserData(userDoc.data());
           } else {
-            // Document doesn't exist yet, but we have the Auth user
             setUserData({
               name: user.displayName || '',
               email: user.email,
@@ -69,6 +84,63 @@ export default function ProfileScreen() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) {
+      setRecentMatches([]);
+      setLoadingMatches(false);
+      return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const q = query(
+      collection(firestore, 'matches'),
+      where('playerIds', 'array-contains', user.uid),
+      orderBy('date', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetched = snapshot.docs
+        .map(docSnap => {
+          const d = docSnap.data();
+          if ((d.date || '') >= today) return null;
+
+          const players = d.players || [];
+          const userPlayer = players.find((p: any) => p.id === user.uid);
+          const userTeam = userPlayer?.team || 1;
+          const opponents = players
+            .filter((p: any) => p.team !== userTeam)
+            .map((p: any) => p.name)
+            .filter(Boolean);
+          
+          const opponentText = opponents.length > 0 ? opponents.join(' & ') : 'Tegenstanders';
+          
+          let result: 'Win' | 'Loss' | 'Draw' = 'Draw';
+          if (d.won === true) result = 'Win';
+          else if (d.won === false) result = 'Loss';
+
+          return {
+            id: docSnap.id,
+            result,
+            score: d.result || '0-0',
+            opponent: opponentText,
+            date: d.date || '',
+            court: d.club || 'Onbekende club',
+          };
+        })
+        .filter((m): m is RecentMatch => m !== null)
+        .slice(0, 3);
+
+      setRecentMatches(fetched);
+      setLoadingMatches(false);
+    }, (err) => {
+      console.error('Error fetching recent matches:', err);
+      setLoadingMatches(false);
+    });
+
+    return () => unsubscribe();
+  }, [auth.currentUser]);
 
   if (loading) {
     return (
@@ -92,7 +164,7 @@ export default function ProfileScreen() {
   // Fallback for missing data
   const name = userData.name || 'Onbekende Gebruiker';
   const location = userData.location || 'Locatie onbekend';
-  const avatar = userData.avatar || 'https://i.pravatar.cc/300?img=11';
+  const avatar = userData.avatar;
   const level = userData.level || 2.5;
   const createdAt = userData.createdAt?.toDate ? userData.createdAt.toDate() : new Date();
   const memberSince = createdAt.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
@@ -120,7 +192,13 @@ export default function ProfileScreen() {
           activeOpacity={0.88}
         >
           <View style={styles.avatarWrapper}>
-            <Image source={{ uri: avatar }} style={styles.avatar} />
+            {avatar ? (
+              <Image source={{ uri: avatar }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
+                <Ionicons name="person" size={40} color="#ccc" />
+              </View>
+            )}
             <View style={styles.avatarEdit}>
               <Ionicons name="camera" size={14} color="#fff" />
             </View>
@@ -174,25 +252,34 @@ export default function ProfileScreen() {
             <Text style={styles.cardTitle}>Recente Wedstrijden</Text>
           </View>
 
-          {RECENT_MATCHES.map((m, idx) => (
-            <View
-              key={m.id}
-              style={[styles.matchRow, idx < RECENT_MATCHES.length - 1 && styles.matchRowBorder]}
-            >
-              <View style={[styles.resultBadge, m.result === 'Win' ? styles.winBadge : styles.lossBadge]}>
-                <Text style={[styles.resultBadgeText, { color: m.result === 'Win' ? '#00A86B' : '#E53935' }]}>
-                  {m.result === 'Win' ? 'W' : 'V'}
+          {loadingMatches ? (
+            <ActivityIndicator size="small" color="#00A86B" style={{ marginVertical: 20 }} />
+          ) : recentMatches.length > 0 ? (
+            recentMatches.map((m, idx) => (
+              <TouchableOpacity
+                key={m.id}
+                style={[styles.matchRow, idx < recentMatches.length - 1 && styles.matchRowBorder]}
+                onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: m.id } })}
+              >
+                <View style={[styles.resultBadge, m.result === 'Win' ? styles.winBadge : m.result === 'Loss' ? styles.lossBadge : { backgroundColor: '#fff8ee' }]}>
+                  <Text style={[styles.resultBadgeText, { color: m.result === 'Win' ? '#00A86B' : m.result === 'Loss' ? '#E53935' : '#F5A623' }]}>
+                    {m.result === 'Win' ? 'W' : m.result === 'Loss' ? 'V' : 'G'}
+                  </Text>
+                </View>
+                <View style={styles.matchInfo}>
+                  <Text style={styles.matchOpponent} numberOfLines={1}>{m.opponent}</Text>
+                  <Text style={styles.matchMeta}>{m.court} · {m.date}</Text>
+                </View>
+                <Text style={[styles.matchScore, m.result === 'Win' ? styles.scoreWin : m.result === 'Loss' ? styles.scoreLoss : { color: '#F5A623' }]}>
+                  {m.score}
                 </Text>
-              </View>
-              <View style={styles.matchInfo}>
-                <Text style={styles.matchOpponent}>{m.opponent}</Text>
-                <Text style={styles.matchMeta}>{m.court} · {m.date}</Text>
-              </View>
-              <Text style={[styles.matchScore, m.result === 'Win' ? styles.scoreWin : styles.scoreLoss]}>
-                {m.score}
-              </Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <Text style={{ color: '#bbb', fontSize: 13 }}>Nog geen wedstrijden gespeeld</Text>
             </View>
-          ))}
+          )}
 
           <TouchableOpacity
             style={styles.viewAllBtn}

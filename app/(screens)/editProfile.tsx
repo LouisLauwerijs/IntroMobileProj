@@ -6,7 +6,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { auth, firestore, doc, getDoc, setDoc, onAuthStateChanged } from '../../firebase';
+import * as ImagePicker from 'expo-image-picker';
+import { 
+  auth, 
+  firestore, 
+  storage,
+  doc, 
+  getDoc, 
+  setDoc, 
+  onAuthStateChanged,
+  ref,
+  uploadBytes,
+  getDownloadURL
+} from '../../firebase';
 
 // ─── Default state ────────────────────────────────────────────────────────────
 
@@ -17,14 +29,11 @@ const DEFAULT_FORM = {
   phone: '',
   location: '',
   bio: '',
-  avatar: 'https://i.pravatar.cc/300?img=11',
+  avatar: '',
   gender: 'Man',
   birthYear: '',
   hand: 'Rechts',
-  position: 'Beide',
-  currentPassword: '',
-  newPassword: '',
-  confirmPassword: '',
+  position: 'Beide'
 };
 
 const INTERESTS = [
@@ -37,7 +46,7 @@ const GENDERS   = ['Man', 'Vrouw', 'Niet-binair', 'Zeg ik liever niet'];
 const HANDS     = ['Rechts', 'Links'];
 const POSITIONS = ['Links', 'Rechts', 'Beide'];
 
-const TABS = ['Persoonlijk', 'Voorkeuren', 'Wachtwoord', 'Interesses'];
+const TABS = ['Persoonlijk', 'Voorkeuren', 'Interesses'];
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
@@ -131,24 +140,6 @@ function PreferencesTab({ form, setField }: { form: typeof DEFAULT_FORM; setFiel
   );
 }
 
-function PasswordTab({ form, setField }: { form: typeof DEFAULT_FORM; setField: (k: string, v: string) => void }) {
-  return (
-    <>
-      <View style={styles.infoBox}>
-        <Ionicons name="lock-closed-outline" size={16} color="#00A86B" />
-        <Text style={styles.infoBoxText}>Gebruik minimaal 8 tekens met een combinatie van letters en cijfers.</Text>
-      </View>
-      <Field label="Huidig wachtwoord" value={form.currentPassword} onChange={(v) => setField('currentPassword', v)} secure placeholder="••••••••" />
-      <Field label="Nieuw wachtwoord"  value={form.newPassword}     onChange={(v) => setField('newPassword', v)}     secure placeholder="••••••••" />
-      <Field label="Bevestig wachtwoord" value={form.confirmPassword} onChange={(v) => setField('confirmPassword', v)} secure placeholder="••••••••" />
-
-      <TouchableOpacity style={styles.forgotBtn}>
-        <Text style={styles.forgotText}>Wachtwoord vergeten?</Text>
-      </TouchableOpacity>
-    </>
-  );
-}
-
 function InterestsTab({ selected, toggle }: { selected: string[]; toggle: (v: string) => void }) {
   return (
     <>
@@ -189,6 +180,7 @@ export default function EditProfileScreen() {
   const [interests, setInterests] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -214,7 +206,7 @@ export default function EditProfileScreen() {
               phone: data.phone || '',
               location: data.location || '',
               bio: data.bio || '',
-              avatar: data.avatar || 'https://i.pravatar.cc/300?img=11',
+              avatar: data.avatar || '',
               gender: data.gender || 'Man',
               birthYear: data.birthYear || '',
               hand: data.hand || 'Rechts',
@@ -252,6 +244,64 @@ export default function EditProfileScreen() {
     setInterests((prev) =>
       prev.includes(val) ? prev.filter((i) => i !== val) : [...prev, val]
     );
+
+  const pickImage = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // Request permissions
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Fout', 'Sorry, we hebben toestemming nodig om door je foto\'s te bladeren.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
+
+    if (!result.canceled) {
+      handleImageUpload(result.assets[0].uri);
+    }
+  };
+
+  const handleImageUpload = async (uri: string) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setUploading(true);
+    try {
+      // 1. Fetch data from URI (needed for uploadBytes)
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // 2. Create Storage reference
+      const filename = `avatars/${user.uid}_${Date.now()}.jpg`;
+      const storageRef = ref(storage, filename);
+
+      // 3. Upload to Storage
+      await uploadBytes(storageRef, blob);
+
+      // 4. Get Download URL
+      const downloadURL = await getDownloadURL(storageRef);
+
+      // 5. Update local state & Firestore
+      setField('avatar', downloadURL);
+      
+      const userRef = doc(firestore, 'users', user.uid);
+      await setDoc(userRef, { avatar: downloadURL }, { merge: true });
+
+      Alert.alert('Succes', 'Profielfoto is bijgewerkt!');
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      Alert.alert('Fout', 'Kon foto niet uploaden. Probeer het later opnieuw.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSave = async () => {
     const user = auth.currentUser;
@@ -314,12 +364,23 @@ export default function EditProfileScreen() {
       {/* Avatar section */}
       <View style={styles.avatarSection}>
         <View style={styles.avatarWrap}>
-          <Image source={{ uri: form.avatar }} style={styles.avatar} />
-          <TouchableOpacity style={styles.avatarEdit}>
-            <Ionicons name="camera" size={15} color="#fff" />
-          </TouchableOpacity>
+          {uploading ? (
+            <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
+              <ActivityIndicator color="#00A86B" />
+            </View>
+          ) : form.avatar ? (
+            <Image source={{ uri: form.avatar }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="person" size={50} color="#ccc" />
+            </View>
+          )}
         </View>
-        <Text style={styles.changePhotoText}>Foto wijzigen</Text>
+        <TouchableOpacity onPress={pickImage} disabled={uploading}>
+          <Text style={styles.changePhotoText}>
+            {uploading ? 'Bezig met uploaden...' : 'Foto wijzigen'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Tabs */}
@@ -347,7 +408,6 @@ export default function EditProfileScreen() {
       >
         {activeTab === 'Persoonlijk' && <PersonalTab   form={form} setField={setField} />}
         {activeTab === 'Voorkeuren' && <PreferencesTab form={form} setField={setField} />}
-        {activeTab === 'Wachtwoord' && <PasswordTab    form={form} setField={setField} />}
         {activeTab === 'Interesses' && <InterestsTab   selected={interests} toggle={toggleInterest} />}
 
         <View style={{ height: 32 }} />

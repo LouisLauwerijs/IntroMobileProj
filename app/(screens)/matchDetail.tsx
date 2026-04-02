@@ -60,11 +60,15 @@ function PlayerTile({ player }: { player: Player }) {
         <View style={styles.emptyAvatar}>
           <Ionicons name="person-add-outline" size={22} color="#ccc" />
         </View>
-      ) : (
+      ) : player.avatar ? (
         <Image 
-          source={{ uri: player.avatar || `https://i.pravatar.cc/100?u=${player.id}` }} 
+          source={{ uri: player.avatar }} 
           style={styles.playerAvatar} 
         />
+      ) : (
+        <View style={[styles.playerAvatar, { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' }]}>
+          <Ionicons name="person" size={24} color="#ccc" />
+        </View>
       )}
       <Text style={[styles.playerName, isEmpty && { color: '#bbb' }]} numberOfLines={1}>
         {isEmpty ? 'Open plek' : player.name}{isYou ? ' (jij)' : ''}

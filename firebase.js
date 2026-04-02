@@ -16,6 +16,7 @@ import {
   getDoc,
   setDoc
 } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
 const firebaseConfig = {
@@ -31,10 +32,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const firestore = getFirestore(app);
+const storage = getStorage(app);
+
 console.log('Firebase config:', firebaseConfig);
 export { 
   auth, 
-  firestore, 
+  firestore,
+  storage,
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   onAuthStateChanged,
@@ -49,5 +53,8 @@ export {
   updateDoc,
   arrayUnion,
   getDoc,
-  setDoc
+  setDoc,
+  ref,
+  uploadBytes,
+  getDownloadURL
 };

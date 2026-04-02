@@ -1,12 +1,22 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { 
+  auth, 
+  firestore, 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot,
+  onAuthStateChanged
+} from '../../firebase';
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type MatchRecord = {
   id: string;
@@ -22,19 +32,6 @@ type MatchRecord = {
   levelDelta: number; // level change after match
 };
 
-const MATCHES: MatchRecord[] = [
-  { id: '1',  result: 'Win',  score: '6-4, 6-3',   opponent: 'Team Rivera',  partner: 'Lars Wouters',   date: '28 Feb 2025', court: 'Court A', club: 'City Padel Club',    type: 'Competitief',     duration: '75 min',  levelDelta: +0.1 },
-  { id: '2',  result: 'Loss', score: '4-6, 5-7',   opponent: 'Team Dupont',  partner: 'Noah Pieters',   date: '24 Feb 2025', court: 'Court 2', club: 'Riverside Padel',    type: 'Competitief',     duration: '82 min',  levelDelta: -0.05 },
-  { id: '3',  result: 'Win',  score: '6-2, 7-5',   opponent: 'Team Santos',  partner: 'Lars Wouters',   date: '19 Feb 2025', court: 'Court B', club: 'Central Sports Hub', type: 'Vriendschappelijk', duration: '90 min', levelDelta: 0 },
-  { id: '4',  result: 'Win',  score: '7-6, 6-4',   opponent: 'Team Martens', partner: 'Emma Jacobs',    date: '14 Feb 2025', court: 'Court 1', club: 'Sportpark Noord',    type: 'Competitief',     duration: '95 min',  levelDelta: +0.15 },
-  { id: '5',  result: 'Loss', score: '3-6, 2-6',   opponent: 'Team Claes',   partner: 'Lars Wouters',   date: '08 Feb 2025', court: 'Court A', club: 'City Padel Club',    type: 'Competitief',     duration: '58 min',  levelDelta: -0.1 },
-  { id: '6',  result: 'Win',  score: '6-3, 6-1',   opponent: 'Team Wouters', partner: 'Noah Pieters',   date: '02 Feb 2025', court: 'Court 3', club: 'Riverside Padel',    type: 'Vriendschappelijk', duration: '62 min', levelDelta: 0 },
-  { id: '7',  result: 'Draw', score: '6-4, 4-6, 10-7', opponent: 'Team Leclercq', partner: 'Lars Wouters', date: '27 Jan 2025', court: 'Court B', club: 'Central Sports Hub', type: 'Competitief',  duration: '115 min', levelDelta: +0.05 },
-  { id: '8',  result: 'Loss', score: '5-7, 3-6',   opponent: 'Team De Wolf', partner: 'Emma Jacobs',    date: '21 Jan 2025', court: 'Court 2', club: 'City Padel Club',    type: 'Competitief',     duration: '78 min',  levelDelta: -0.1 },
-  { id: '9',  result: 'Win',  score: '6-0, 6-2',   opponent: 'Team Pieters', partner: 'Lars Wouters',   date: '15 Jan 2025', court: 'Court A', club: 'Sportpark Noord',    type: 'Vriendschappelijk', duration: '50 min', levelDelta: 0 },
-  { id: '10', result: 'Win',  score: '7-5, 6-4',   opponent: 'Team Berg',    partner: 'Noah Pieters',   date: '09 Jan 2025', court: 'Court 1', club: 'Riverside Padel',    type: 'Competitief',     duration: '88 min',  levelDelta: +0.1 },
-];
-
 const FILTER_TABS = ['Alle', 'Wins', 'Losses', 'Competitief', 'Vriendschappelijk'];
 
 const RESULT_CONFIG = {
@@ -45,11 +42,11 @@ const RESULT_CONFIG = {
 
 // ─── Match Row ────────────────────────────────────────────────────────────────
 
-function MatchRow({ match }: { match: MatchRecord }) {
+function MatchRow({ match, onPress }: { match: MatchRecord; onPress: () => void }) {
   const cfg = RESULT_CONFIG[match.result];
 
   return (
-    <TouchableOpacity style={styles.matchRow} activeOpacity={0.82}>
+    <TouchableOpacity style={styles.matchRow} activeOpacity={0.82} onPress={onPress}>
       {/* Result badge */}
       <View style={[styles.resultBadge, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
         <Text style={[styles.resultBadgeText, { color: cfg.text }]}>{cfg.label}</Text>
@@ -104,8 +101,85 @@ function MatchRow({ match }: { match: MatchRecord }) {
 export default function MatchHistoryScreen() {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('Alle');
+  const [matches, setMatches] = useState<MatchRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
-  const filtered = MATCHES.filter((m) => {
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setMatches([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const today = new Date().toISOString().split('T')[0];
+
+    const q = query(
+      collection(firestore, 'matches'),
+      where('playerIds', 'array-contains', currentUser.uid),
+      orderBy('date', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetched: MatchRecord[] = snapshot.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          const matchDate = d.date || '';
+          
+          // Only matches before today
+          if (matchDate >= today) return null;
+
+          const players = d.players || [];
+          const userPlayer = players.find((p: any) => p.id === currentUser.uid);
+          const userTeam = userPlayer?.team || 1;
+          
+          const partner = players.find((p: any) => p.team === userTeam && p.id !== currentUser.uid)?.name || 'Geen partner';
+          const opponents = players
+            .filter((p: any) => p.team !== userTeam)
+            .map((p: any) => p.name)
+            .filter(Boolean);
+          
+          const opponentText = opponents.length > 0 ? opponents.join(' & ') : 'Tegenstanders';
+
+          let result: 'Win' | 'Loss' | 'Draw' = 'Draw';
+          if (d.won === true) result = 'Win';
+          else if (d.won === false) result = 'Loss';
+
+          return {
+            id: docSnap.id,
+            result,
+            score: d.result || 'Nog geen score',
+            opponent: opponentText,
+            partner: partner,
+            date: matchDate,
+            court: d.court || 'Baan 1',
+            club: d.club || 'Onbekende club',
+            type: d.isCompetitive ? 'Competitief' : 'Vriendschappelijk',
+            duration: d.duration || '-- min',
+            levelDelta: d.levelDelta || 0,
+          };
+        })
+        .filter((m): m is MatchRecord => m !== null);
+
+      setMatches(fetched);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching match history:', error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  const filtered = matches.filter((m) => {
     if (activeFilter === 'Wins')   return m.result === 'Win';
     if (activeFilter === 'Losses') return m.result === 'Loss';
     if (activeFilter === 'Competitief')     return m.type === 'Competitief';
@@ -113,10 +187,18 @@ export default function MatchHistoryScreen() {
     return true;
   });
 
-  const wins   = MATCHES.filter((m) => m.result === 'Win').length;
-  const losses = MATCHES.filter((m) => m.result === 'Loss').length;
-  const draws  = MATCHES.filter((m) => m.result === 'Draw').length;
-  const winRate = Math.round((wins / MATCHES.length) * 100);
+  const wins   = matches.filter((m) => m.result === 'Win').length;
+  const losses = matches.filter((m) => m.result === 'Loss').length;
+  const draws  = matches.filter((m) => m.result === 'Draw').length;
+  const winRate = matches.length > 0 ? Math.round((wins / matches.length) * 100) : 0;
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -132,7 +214,7 @@ export default function MatchHistoryScreen() {
       {/* Stats summary bar */}
       <View style={styles.statsBar}>
         {[
-          { label: 'Gespeeld', value: MATCHES.length, color: '#1a1a1a' },
+          { label: 'Gespeeld', value: matches.length, color: '#1a1a1a' },
           { label: 'Gewonnen', value: wins,            color: '#00A86B' },
           { label: 'Verloren', value: losses,          color: '#E53935' },
           { label: 'Gelijk',   value: draws,           color: '#F5A623' },
@@ -168,19 +250,22 @@ export default function MatchHistoryScreen() {
 
       {/* List */}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
-        <View style={styles.listCard}>
-          {filtered.map((match, idx) => (
-            <View key={match.id} style={idx < filtered.length - 1 && styles.separator}>
-              <MatchRow match={match} />
-            </View>
-          ))}
-        </View>
-
-        {filtered.length === 0 && (
+        {filtered.length > 0 ? (
+          <View style={styles.listCard}>
+            {filtered.map((match, idx) => (
+              <View key={match.id} style={idx < filtered.length - 1 && styles.separator}>
+                <MatchRow 
+                  match={match} 
+                  onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+                />
+              </View>
+            ))}
+          </View>
+        ) : (
           <View style={styles.empty}>
             <Ionicons name="tennisball-outline" size={48} color="#ccc" />
             <Text style={styles.emptyTitle}>Geen wedstrijden</Text>
-            <Text style={styles.emptySub}>Pas de filter aan</Text>
+            <Text style={styles.emptySub}>Je hebt nog geen afgelopen wedstrijden die voldoen aan deze filter.</Text>
           </View>
         )}
 
