@@ -24,7 +24,6 @@ export default function HomeScreen() {
   const quickActions = [
     { icon: 'add-circle-outline', label: 'Nieuwe match', onPress: () => router.push('/(screens)/newMatch') },
     { icon: 'search-outline', label: 'Zoek match', onPress: () => router.push('/(screens)/findMatch') },
-    { icon: 'calendar-outline', label: 'Reserveer baan', onPress: () => router.push('/(screens)/bookCourt') },
     { icon: 'trophy-outline', label: 'Ranglijsten', onPress: () => router.push('/(screens)/rankings') },
   ];
 
