@@ -53,13 +53,14 @@ export default function ChatDetailScreen() {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [conversationData, setConversationData] = useState<ConversationData | null>(null);
+  const [otherUser, setOtherUser] = useState<{ name: string; avatar: string } | null>(null);
   const flatListRef = useRef(null);
   const currentUser = auth.currentUser;
 
   const conversationIdStr = Array.isArray(conversationId) ? conversationId[0] : conversationId;
 
   useEffect(() => {
-    if (!conversationIdStr) return;
+    if (!conversationIdStr || !currentUser) return;
 
     // Fetch conversation data
     const conversationRef = doc(firestore, 'conversations', conversationIdStr);
@@ -68,6 +69,20 @@ export default function ChatDetailScreen() {
         if (docSnap.exists()) {
           const data = docSnap.data() as ConversationData;
           setConversationData(data);
+          
+          // Identify other user and listen to their profile
+          const otherId = data.participantIds.find(id => id !== currentUser.uid);
+          if (otherId) {
+            onSnapshot(doc(firestore, 'users', otherId), (userSnap) => {
+              if (userSnap.exists()) {
+                const uData = userSnap.data();
+                setOtherUser({
+                  name: uData.username || uData.name || 'Gebruiker',
+                  avatar: uData.avatar || '',
+                });
+              }
+            });
+          }
         }
       })
       .catch((error) => console.error('Error fetching conversation:', error));
@@ -172,18 +187,6 @@ export default function ChatDetailScreen() {
     return `${hours}:${minutes}`;
   };
 
-  const getOtherParticipant = () => {
-    if (!conversationData || !currentUser) return { name: 'Unknown', avatar: '' };
-    const otherIndex = conversationData.participantIds.findIndex((id) => id !== currentUser.uid);
-    if (otherIndex < 0) return { name: 'Unknown', avatar: '' };
-    return {
-      name: conversationData.participantNames[otherIndex] || 'Unknown',
-      avatar: conversationData.participantAvatars[otherIndex] || '',
-    };
-  };
-
-  const otherParticipant = getOtherParticipant();
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -208,16 +211,14 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerInfo}>
-            {otherParticipant.avatar ? (
-              <Image source={{ uri: otherParticipant.avatar }} style={styles.headerAvatar} />
+            {otherUser?.avatar ? (
+              <Image source={{ uri: otherUser.avatar }} style={styles.headerAvatar} />
             ) : (
               <View style={styles.headerAvatarPlaceholder}>
-                <Text style={styles.headerAvatarInitial}>
-                  {otherParticipant.name.charAt(0).toUpperCase()}
-                </Text>
+                <Ionicons name="person" size={20} color="#fff" />
               </View>
             )}
-            <Text style={styles.headerTitle}>{otherParticipant.name}</Text>
+            <Text style={styles.headerTitle}>{otherUser?.name || 'Laden...'}</Text>
           </View>
 
           <View style={styles.headerRightPlaceholder} />
@@ -251,15 +252,24 @@ export default function ChatDetailScreen() {
                   >
                     {item.content}
                   </Text>
-                  <Text
-                    style={[
-                      styles.messageTime,
-                      isCurrentUser ? styles.messageTimeOwn : styles.messageTimeOther,
-                    ]}
-                  >
-                    {formatMessageTime(item.timestamp)}
-                    {isCurrentUser && item.isRead && ' ✓✓'}
-                  </Text>
+                  <View style={styles.messageBottomRow}>
+                    <Text
+                      style={[
+                        styles.messageTime,
+                        isCurrentUser ? styles.messageTimeOwn : styles.messageTimeOther,
+                      ]}
+                    >
+                      {formatMessageTime(item.timestamp)}
+                    </Text>
+                    {isCurrentUser && (
+                      <Ionicons 
+                        name="checkmark-done" 
+                        size={14} 
+                        color={item.isRead ? '#fff' : 'rgba(255,255,255,0.5)'} 
+                        style={{ marginLeft: 4 }}
+                      />
+                    )}
+                  </View>
                 </View>
               </View>
             );
@@ -272,8 +282,8 @@ export default function ChatDetailScreen() {
         <View style={styles.inputContainer}>
           <TextInput
             style={[styles.input, { maxHeight: 100 }]}
-            placeholder="Bericht..."
-            placeholderTextColor="#ccc"
+            placeholder="Typ een bericht..."
+            placeholderTextColor="#999"
             value={messageText}
             onChangeText={setMessageText}
             multiline
@@ -299,7 +309,7 @@ export default function ChatDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#f5f5f5',
   },
   keyboardAvoid: {
     flex: 1,
@@ -317,6 +327,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
   },
   backButton: {
     padding: 8,
@@ -325,43 +339,39 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 4,
   },
   headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 12,
   },
   headerAvatarPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#00A86B',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
-  },
-  headerAvatarInitial: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
+    marginRight: 12,
   },
   headerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
   },
   headerRightPlaceholder: {
     width: 40,
   },
   messagesContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
   },
   messageWrapper: {
-    marginVertical: 4,
+    marginVertical: 6,
     flexDirection: 'row',
+    width: '100%',
   },
   messageWrapperOwn: {
     justifyContent: 'flex-end',
@@ -370,20 +380,33 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   messageBubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
+    maxWidth: '80%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   messageBubbleOwn: {
     backgroundColor: '#00A86B',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 4,
   },
   messageBubbleOther: {
-    backgroundColor: '#e8e8e8',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
   },
   messageText: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
   },
   messageTextOwn: {
     color: '#fff',
@@ -391,12 +414,17 @@ const styles = StyleSheet.create({
   messageTextOther: {
     color: '#333',
   },
-  messageTime: {
-    fontSize: 11,
+  messageBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     marginTop: 4,
   },
+  messageTime: {
+    fontSize: 10,
+  },
   messageTimeOwn: {
-    color: '#d0f0e0',
+    color: 'rgba(255,255,255,0.7)',
   },
   messageTimeOther: {
     color: '#999',
@@ -408,27 +436,28 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopColor: '#eee',
   },
   input: {
     flex: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    color: '#333',
-    fontSize: 14,
+    borderRadius: 24,
+    backgroundColor: '#f0f2f5',
+    color: '#1a1a1a',
+    fontSize: 15,
     marginRight: 8,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#00A86B',
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 2,
   },
   sendButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#e0e0e0',
   },
 });

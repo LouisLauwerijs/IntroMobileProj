@@ -8,8 +8,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
-import { signOut } from 'firebase/auth';
+import { 
+  auth, 
+  firestore, 
+  doc, 
+  getDoc, 
+  onAuthStateChanged,
+  collection,
+  query,
+  where,
+  getDocs,
+  deleteDoc
+} from '../../firebase';
+import { signOut, deleteUser } from 'firebase/auth';
 
 type SettingRow = {
   icon: string;
@@ -46,6 +57,7 @@ export default function SettingsScreen() {
           } else {
             setUserData({
               name: user.displayName || 'Gebruiker',
+              username: 'gebruiker',
               email: user.email,
               level: 2.5,
               avatar: '',
@@ -66,13 +78,9 @@ export default function SettingsScreen() {
   }, []);
 
   const handleLogout = async () => {
-    console.log('Logout button pressed');
-    
     const performLogout = async () => {
       try {
-        console.log('Performing Firebase signOut...');
         await signOut(auth);
-        console.log('SignOut successful, redirecting...');
         router.replace('/login');
       } catch (error) {
         console.error('Error signing out:', error);
@@ -88,6 +96,65 @@ export default function SettingsScreen() {
       Alert.alert('Uitloggen', 'Weet je zeker dat je wilt uitloggen?', [
         { text: 'Annuleren', style: 'cancel' },
         { text: 'Uitloggen', style: 'destructive', onPress: performLogout },
+      ]);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Fout', 'Je bent niet ingelogd.');
+      return;
+    }
+
+    const confirmMessage = 'Weet je zeker dat je je account wilt verwijderen? Al je profielgegevens en gesprekken worden permanent gewist. Dit kan niet ongedaan worden gemaakt.';
+
+    const performDeletion = async () => {
+      setLoading(true);
+      try {
+        console.log('Account verwijderen: Gesprekken zoeken...');
+        const convsQuery = query(
+          collection(firestore, 'conversations'),
+          where('participantIds', 'array-contains', user.uid)
+        );
+        const convsSnap = await getDocs(convsQuery);
+        
+        console.log(`Account verwijderen: ${convsSnap.docs.length} gesprekken verwijderen...`);
+        const deleteConvoPromises = convsSnap.docs.map(convo => deleteDoc(convo.ref));
+        await Promise.all(deleteConvoPromises);
+
+        console.log('Account verwijderen: Profiel wissen...');
+        await deleteDoc(doc(firestore, 'users', user.uid));
+
+        console.log('Account verwijderen: Auth gebruiker verwijderen...');
+        await deleteUser(user);
+
+        console.log('Account verwijderen: Succes!');
+        router.replace('/login');
+      } catch (error: any) {
+        console.error('Fout bij verwijderen account:', error);
+        if (error.code === 'auth/requires-recent-login') {
+          Alert.alert(
+            'Veiligheid', 
+            'Voor je veiligheid moet je opnieuw inloggen voordat je je account kunt verwijderen.',
+            [{ text: 'OK', onPress: () => handleLogout() }]
+          );
+        } else {
+          Alert.alert('Fout', 'Er is iets misgegaan: ' + (error.message || 'Onbekende fout'));
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMessage)) {
+        await performDeletion();
+      }
+    } else {
+      Alert.alert('Account verwijderen', confirmMessage, [
+        { text: 'Annuleren', style: 'cancel' },
+        { text: 'Verwijderen', style: 'destructive', onPress: performDeletion },
       ]);
     }
   };
@@ -129,7 +196,7 @@ export default function SettingsScreen() {
       title: 'Sessie',
       rows: [
         { icon: 'log-out-outline', label: 'Uitloggen', destructive: true, color: '#E53935', onPress: handleLogout },
-        { icon: 'trash-outline',   label: 'Account verwijderen', destructive: true, color: '#E53935' },
+        { icon: 'trash-outline',   label: 'Account verwijderen', destructive: true, color: '#E53935', onPress: handleDeleteAccount },
       ],
     },
   ];
@@ -142,7 +209,7 @@ export default function SettingsScreen() {
     );
   }
 
-  const name = userData?.name || 'Onbekende Gebruiker';
+  const displayName = userData?.username || userData?.name || 'Onbekende Gebruiker';
   const email = userData?.email || '';
   const avatar = userData?.avatar;
   const level = userData?.level || 2.5;
@@ -174,7 +241,7 @@ export default function SettingsScreen() {
             </View>
           )}
           <View style={styles.identityInfo}>
-            <Text style={styles.identityName}>{name}</Text>
+            <Text style={styles.identityName}>{displayName}</Text>
             <Text style={styles.identityEmail}>{email}</Text>
           </View>
           <View style={styles.levelChip}>

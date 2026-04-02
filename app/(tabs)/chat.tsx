@@ -38,6 +38,96 @@ type Conversation = {
   unreadCount: number;
 };
 
+// ─── Conversation Item ────────────────────────────────────────────────────────
+
+function ConversationItem({ 
+  conversation, 
+  currentUser, 
+  onPress 
+}: { 
+  conversation: Conversation; 
+  currentUser: any;
+  onPress: () => void;
+}) {
+  const [otherUser, setOtherUser] = useState<{ name: string; avatar: string } | null>(null);
+  const otherId = conversation.participantIds.find(id => id !== currentUser?.uid);
+
+  useEffect(() => {
+    if (!otherId) return;
+    const userRef = doc(firestore, 'users', otherId);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setOtherUser({
+          name: data.username || data.name || 'Gebruiker',
+          avatar: data.avatar || '',
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, [otherId]);
+
+  const hasUnread = conversation.unreadCount > 0;
+  const displayName = otherUser?.name || 'Laden...';
+  const displayAvatar = otherUser?.avatar || '';
+
+  const formatTime = (timestamp: any) => {
+    if (!timestamp) return '';
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+
+    if (diffMins < 1) return 'Nu';
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}u`;
+    return date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+  };
+
+  return (
+    <TouchableOpacity
+      style={[styles.conversationItem, hasUnread && styles.conversationItemUnread]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.conversationLeft}>
+        {displayAvatar ? (
+          <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <Ionicons name="person" size={24} color="#fff" />
+          </View>
+        )}
+
+        <View style={styles.conversationInfo}>
+          <Text style={[styles.participantName, hasUnread && styles.participantNameUnread]}>
+            {displayName}
+          </Text>
+          <Text
+            style={[styles.lastMessage, hasUnread && styles.lastMessageUnread]}
+            numberOfLines={1}
+          >
+            {conversation.lastMessageSenderId === currentUser?.uid ? 'Jij: ' : ''}
+            {conversation.lastMessage}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.conversationRight}>
+        <Text style={styles.timeText}>{formatTime(conversation.lastMessageTime)}</Text>
+        {hasUnread && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadBadgeText}>{conversation.unreadCount}</Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
 export default function ChatScreen() {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -79,8 +169,6 @@ export default function ChatScreen() {
     await setDoc(conversationDoc, {
       pairId,
       participantIds: [currentUser.uid, otherUser.id],
-      participantNames: [currentUser.displayName || currentUser.email?.split('@')[0] || '', otherUser.name || otherUser.username || otherUser.email],
-      participantAvatars: [currentUser?.photoURL || '', otherUser.avatar || ''],
       lastMessage: '',
       lastMessageTime: serverTimestamp(),
       lastMessageSenderId: '',
@@ -151,7 +239,7 @@ export default function ChatScreen() {
             participantIds: data.participantIds || [],
             participantNames: data.participantNames || [],
             participantAvatars: data.participantAvatars || [],
-            lastMessage: data.lastMessage || 'No messages yet',
+            lastMessage: data.lastMessage || 'Nog geen berichten',
             lastMessageTime: data.lastMessageTime || new Date().toISOString(),
             lastMessageSenderId: data.lastMessageSenderId || '',
             unreadCount: data.unreadCount?.[currentUser.uid] || 0,
@@ -168,31 +256,6 @@ export default function ChatScreen() {
 
     return () => unsubscribe();
   }, [currentUser]);
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString();
-  };
-
-  const getOtherParticipant = (conversation: Conversation) => {
-    const otherIndex = conversation.participantIds.findIndex((id) => id !== currentUser?.uid);
-    if (otherIndex < 0) return { name: 'Unknown', avatar: '' };
-    return {
-      name: conversation.participantNames[otherIndex] || 'Unknown',
-      avatar: conversation.participantAvatars[otherIndex] || '',
-    };
-  };
 
   if (loading) {
     return (
@@ -243,58 +306,14 @@ export default function ChatScreen() {
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
-          {conversations.map((conversation, index) => {
-            const otherParticipant = getOtherParticipant(conversation);
-            const hasUnread = conversation.unreadCount > 0;
-
-            return (
-              <TouchableOpacity
-                key={conversation.id}
-                style={[styles.conversationItem, hasUnread && styles.conversationItemUnread]}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(screens)/chatDetail',
-                    params: { conversationId: conversation.id },
-                  })
-                }
-                activeOpacity={0.7}
-              >
-                <View style={styles.conversationLeft}>
-                  {otherParticipant.avatar ? (
-                    <Image source={{ uri: otherParticipant.avatar }} style={styles.avatar} />
-                  ) : (
-                    <View style={styles.avatarPlaceholder}>
-                      <Text style={styles.avatarInitial}>
-                        {otherParticipant.name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-
-                  <View style={styles.conversationInfo}>
-                    <Text style={[styles.participantName, hasUnread && styles.participantNameUnread]}>
-                      {otherParticipant.name}
-                    </Text>
-                    <Text
-                      style={[styles.lastMessage, hasUnread && styles.lastMessageUnread]}
-                      numberOfLines={1}
-                    >
-                      {conversation.lastMessageSenderId === currentUser?.uid ? 'You: ' : ''}
-                      {conversation.lastMessage}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.conversationRight}>
-                  <Text style={styles.timeText}>{formatTime(conversation.lastMessageTime)}</Text>
-                  {hasUnread && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadBadgeText}>{conversation.unreadCount}</Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+          {conversations.map((convo) => (
+            <ConversationItem 
+              key={convo.id} 
+              conversation={convo} 
+              currentUser={currentUser}
+              onPress={() => router.push({ pathname: '/(screens)/chatDetail', params: { conversationId: convo.id } })}
+            />
+          ))}
         </ScrollView>
       )}
     </SafeAreaView>

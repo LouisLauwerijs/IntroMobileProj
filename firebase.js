@@ -15,9 +15,11 @@ import {
   arrayUnion,
   increment,
   getDoc,
+  getDocs,
   setDoc,
-  getDocs
-} from 'firebase/firestore';
+  deleteDoc
+  } from 'firebase/firestore';
+
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // Je Firebase-configuratie (geladen via omgevingsvariabelen in .env)
@@ -58,6 +60,7 @@ export {
   getDoc,
   getDocs,
   setDoc,
+  deleteDoc,
   ref,
   uploadBytes,
   getDownloadURL

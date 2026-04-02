@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { View, TextInput, Button, Text, StyleSheet, Alert } from 'react-native';
+import { 
+  View, 
+  TextInput, 
+  TouchableOpacity, 
+  Text, 
+  StyleSheet, 
+  Alert,
+  ActivityIndicator 
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { 
   auth, 
@@ -20,6 +28,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const normalizeUsername = (value: string) =>
     value
@@ -58,6 +67,7 @@ export default function RegisterScreen() {
     }
 
     setLoading(true);
+    setError('');
     try {
       // 1. Maak de gebruiker aan in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -73,6 +83,7 @@ export default function RegisterScreen() {
         name: displayName,
         username,
         email,
+        level: 2.5, // Default start level
         createdAt: serverTimestamp(),
       });
 
@@ -81,16 +92,14 @@ export default function RegisterScreen() {
         { text: 'OK', onPress: () => router.push('/login') }
       ]);
 
-    } catch (error: any) {
-      console.error('Fout bij registratie:', error.message);
-      setError(error.message);
-      Alert.alert('Fout', error.message);
+    } catch (err: any) {
+      console.error('Fout bij registratie:', err.message);
+      setError(err.message);
+      Alert.alert('Fout', err.message);
     } finally {
       setLoading(false);
     }
   };
-
-  const [error, setError] = useState('');
 
   return (
     <View style={styles.container}>
@@ -101,12 +110,15 @@ export default function RegisterScreen() {
         placeholder="Name"
         value={name}
         onChangeText={setName}
+        autoCapitalize="words"
       />
       <TextInput
         style={styles.input}
         placeholder="Email"
         value={email}
         onChangeText={setEmail}
+        keyboardType="email-address"
+        autoCapitalize="none"
       />
       <TextInput
         style={styles.input}
@@ -115,12 +127,27 @@ export default function RegisterScreen() {
         value={password}
         onChangeText={setPassword}
       />
-      <Button title="Register" onPress={handleRegister} />
+
+      {/* Register button */}
+      <TouchableOpacity 
+        style={[styles.button, loading && styles.disabledButton]} 
+        onPress={handleRegister}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Register</Text>
+        )}
+      </TouchableOpacity>
       
-      {/* Knop om handmatig naar de loginpagina te navigeren */}
-      <View style={{ marginTop: 20 }}>
-        <Button title="Back to Login" onPress={() => router.push('/login')} color="#6b7280" />
-      </View>
+      {/* Back to Login button */}
+      <TouchableOpacity 
+        style={[styles.button, styles.secondaryButton]} 
+        onPress={() => router.push('/login')}
+      >
+        <Text style={styles.buttonText}>Back to Login</Text>
+      </TouchableOpacity>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
@@ -128,11 +155,43 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 32, textAlign: 'center' },
+  container: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    padding: 24, 
+    backgroundColor: '#fff' 
+  },
+  title: { 
+    fontSize: 28, 
+    fontWeight: 'bold', 
+    marginBottom: 32, 
+    textAlign: 'center' 
+  },
   input: {
-    borderWidth: 1, borderColor: '#ccc', borderRadius: 8,
-    padding: 12, marginBottom: 16, fontSize: 16,
+    borderWidth: 1, 
+    borderColor: '#ccc', 
+    borderRadius: 8,
+    padding: 12, 
+    marginBottom: 16, 
+    fontSize: 16,
+  },
+  button: {
+    backgroundColor: '#4F46E5', 
+    borderRadius: 8,
+    padding: 14, 
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  secondaryButton: {
+    backgroundColor: '#6b7280',
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  buttonText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: '600' 
   },
   error: {
     color: 'red',
