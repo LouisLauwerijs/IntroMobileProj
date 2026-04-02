@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Image,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -21,6 +22,9 @@ import {
   orderBy,
   doc,
   getDoc,
+  getDocs,
+  setDoc,
+  serverTimestamp,
 } from '../../firebase';
 
 type Conversation = {
@@ -38,7 +42,94 @@ export default function ChatScreen() {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchUsername, setSearchUsername] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const currentUser = auth.currentUser;
+
+  const normalizeUsername = (text: string) =>
+    text.trim().toLowerCase().replace(/[^a-z0-9_.]/g, '').replace(/\s+/g, '');
+
+  const findUserByUsername = async (username: string) => {
+    const normalized = normalizeUsername(username);
+    if (!normalized) return null;
+
+    const q = query(collection(firestore, 'users'), where('username', '==', normalized));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+
+    const docSnap = snap.docs[0];
+    return { id: docSnap.id, ...(docSnap.data() as any) };
+  };
+
+  const ensureConversation = async (otherUser: any) => {
+    if (!currentUser || !otherUser || otherUser.id === currentUser.uid) {
+      return null;
+    }
+
+    const pairId = [currentUser.uid, otherUser.id].sort().join('_');
+    const convoQuery = query(collection(firestore, 'conversations'), where('pairId', '==', pairId));
+    const convoSnap = await getDocs(convoQuery);
+
+    if (!convoSnap.empty) {
+      return convoSnap.docs[0].id;
+    }
+
+    const conversationDoc = doc(collection(firestore, 'conversations'));
+    await setDoc(conversationDoc, {
+      pairId,
+      participantIds: [currentUser.uid, otherUser.id],
+      participantNames: [currentUser.displayName || currentUser.email?.split('@')[0] || '', otherUser.name || otherUser.username || otherUser.email],
+      participantAvatars: [currentUser?.photoURL || '', otherUser.avatar || ''],
+      lastMessage: '',
+      lastMessageTime: serverTimestamp(),
+      lastMessageSenderId: '',
+      unreadCount: {
+        [currentUser.uid]: 0,
+        [otherUser.id]: 0,
+      },
+      createdAt: serverTimestamp(),
+    });
+
+    return conversationDoc.id;
+  };
+
+  const handleStartDM = async () => {
+    if (!searchUsername.trim() || !currentUser) {
+      setSearchError('Voer een geldige gebruikersnaam in.');
+      return;
+    }
+
+    setSearching(true);
+    setSearchError('');
+
+    try {
+      const otherUser = await findUserByUsername(searchUsername);
+      if (!otherUser) {
+        setSearchError('Gebruiker niet gevonden.');
+        return;
+      }
+
+      if (otherUser.id === currentUser.uid) {
+        setSearchError('Je kunt niet met jezelf chatten.');
+        return;
+      }
+
+      const convId = await ensureConversation(otherUser);
+      if (!convId) {
+        setSearchError('Kan gesprek niet starten.');
+        return;
+      }
+
+      router.push({ pathname: '/(screens)/chatDetail', params: { conversationId: convId } });
+      setSearchUsername('');
+    } catch (error) {
+      console.error(error);
+      setSearchError('Er is een fout opgetreden tijdens zoeken.');
+    } finally {
+      setSearching(false);
+    }
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -118,6 +209,31 @@ export default function ChatScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Berichten</Text>
       </View>
+
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Start DM met gebruikersnaam"
+          value={searchUsername}
+          onChangeText={setSearchUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!searching}
+        />
+        <TouchableOpacity
+          style={[styles.searchButton, searching && styles.searchButtonDisabled]}
+          onPress={handleStartDM}
+          disabled={searching}
+        >
+          {searching ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Ionicons name="send" size={20} color="#fff" />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
 
       {conversations.length === 0 ? (
         <View style={styles.emptyState}>
@@ -302,5 +418,42 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#fff',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 14,
+    fontSize: 14,
+    color: '#333',
+    marginRight: 8,
+  },
+  searchButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#00A86B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  searchError: {
+    color: '#e53935',
+    marginHorizontal: 16,
+    marginTop: 6,
+    marginBottom: 4,
+    fontSize: 12,
   },
 });

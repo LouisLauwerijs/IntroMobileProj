@@ -13,8 +13,10 @@ import {
   onSnapshot,
   updateDoc,
   arrayUnion,
+  increment,
   getDoc,
-  setDoc
+  setDoc,
+  getDocs
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -52,7 +54,9 @@ export {
   onSnapshot,
   updateDoc,
   arrayUnion,
+  increment,
   getDoc,
+  getDocs,
   setDoc,
   ref,
   uploadBytes,

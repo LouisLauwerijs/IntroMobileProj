@@ -27,6 +27,7 @@ import {
   onSnapshot,
   getDoc,
   updateDoc,
+  increment,
 } from '../../firebase';
 
 type Message = {
@@ -104,6 +105,12 @@ export default function ChatDetailScreen() {
               );
             }
           });
+
+          // reset unread counter in conversation
+          const conversationRef = doc(firestore, 'conversations', conversationIdStr);
+          updateDoc(conversationRef, {
+            [`unreadCount.${currentUser.uid}`]: 0,
+          }).catch((err) => console.error('Error resetting unread count:', err));
         }
 
         // Scroll to bottom
@@ -137,13 +144,18 @@ export default function ChatDetailScreen() {
         isRead: false,
       });
 
-      // Update conversation's last message
+      // Update conversation's last message and increment other user's unread counter
       const conversationRef = doc(firestore, 'conversations', conversationIdStr);
-      await updateDoc(conversationRef, {
+      const otherUserId = conversationData?.participantIds?.find((id) => id !== currentUser.uid);
+      const unreadUpdate: any = {
         lastMessage: messageText.trim(),
         lastMessageTime: new Date().toISOString(),
         lastMessageSenderId: currentUser.uid,
-      });
+      };
+      if (otherUserId) {
+        unreadUpdate[`unreadCount.${otherUserId}`] = increment(1);
+      }
+      await updateDoc(conversationRef, unreadUpdate);
 
       setMessageText('');
     } catch (error) {
@@ -259,13 +271,12 @@ export default function ChatDetailScreen() {
         {/* Input */}
         <View style={styles.inputContainer}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { maxHeight: 100 }]}
             placeholder="Bericht..."
             placeholderTextColor="#ccc"
             value={messageText}
             onChangeText={setMessageText}
             multiline
-            maxHeight={100}
             editable={!sending}
           />
           <TouchableOpacity

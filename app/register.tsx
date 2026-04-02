@@ -7,7 +7,11 @@ import {
   createUserWithEmailAndPassword, 
   doc, 
   setDoc, 
-  serverTimestamp 
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs
 } from '../firebase';
 
 export default function RegisterScreen() {
@@ -16,6 +20,36 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const normalizeUsername = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_.]/g, '')
+      .replace(/\s+/g, '');
+
+  const getUniqueUsername = async (base: string) => {
+    let username = normalizeUsername(base);
+    if (!username) username = `user${Math.floor(1000 + Math.random() * 9000)}`;
+
+    let candidate = username;
+    let suffix = 1;
+
+    while (true) {
+      const usernameQ = query(
+        collection(firestore, 'users'),
+        where('username', '==', candidate)
+      );
+      const snapshot = await getDocs(usernameQ);
+
+      if (snapshot.empty) {
+        return candidate;
+      }
+
+      candidate = `${username}${suffix}`;
+      suffix += 1;
+    }
+  };
 
   const handleRegister = async () => {
     if (!name || !email || !password) {
@@ -29,10 +63,16 @@ export default function RegisterScreen() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      // Create username and display name
+      const username = await getUniqueUsername(name);
+      const displayName = name.trim();
+
       // 2. Maak een gebruikersdocument aan in Firestore met de UID als ID
       await setDoc(doc(firestore, 'users', user.uid), {
         uid: user.uid,
-        email: email,
+        name: displayName,
+        username,
+        email,
         createdAt: serverTimestamp(),
       });
 

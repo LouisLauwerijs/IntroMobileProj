@@ -14,6 +14,10 @@ import {
   doc, 
   getDoc, 
   setDoc, 
+  collection,
+  query,
+  where,
+  getDocs,
   onAuthStateChanged,
   ref,
   uploadBytes,
@@ -25,6 +29,7 @@ import {
 const DEFAULT_FORM = {
   firstName: '',
   lastName: '',
+  username: '',
   email: '',
   phone: '',
   location: '',
@@ -103,6 +108,7 @@ function PersonalTab({ form, setField }: { form: typeof DEFAULT_FORM; setField: 
     <>
       <Field label="Voornaam"    value={form.firstName} onChange={(v) => setField('firstName', v)} />
       <Field label="Achternaam"  value={form.lastName}  onChange={(v) => setField('lastName', v)} />
+      <Field label="Gebruikersnaam" value={form.username} onChange={(v) => setField('username', v)} placeholder="Unieke gebruikersnaam" />
       <Field label="E-mail"      value={form.email}     onChange={(v) => setField('email', v)} keyboardType="email-address" />
       <Field label="Telefoon"    value={form.phone}     onChange={(v) => setField('phone', v)} keyboardType="phone-pad" />
       <Field label="Locatie"     value={form.location}  onChange={(v) => setField('location', v)} />
@@ -202,6 +208,7 @@ export default function EditProfileScreen() {
               ...DEFAULT_FORM,
               firstName: firstName,
               lastName: lastName,
+              username: data.username || normalizeUsername(`${firstName}${lastName}`),
               email: data.email || user.email || '',
               phone: data.phone || '',
               location: data.location || '',
@@ -236,6 +243,30 @@ export default function EditProfileScreen() {
 
     return () => unsubscribe();
   }, []);
+
+  const normalizeUsername = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_.]/g, '')
+      .replace(/\s+/g, '');
+
+  const isUsernameAvailable = async (username: string, currentUid: string) => {
+    if (!username) return false;
+
+    const normalized = normalizeUsername(username);
+    const userQuery = query(
+      collection(firestore, 'users'),
+      where('username', '==', normalized)
+    );
+
+    const snapshot = await getDocs(userQuery);
+    if (snapshot.empty) return true;
+
+    if (snapshot.docs.length === 1 && snapshot.docs[0].id === currentUid) return true;
+
+    return false;
+  };
 
   const setField = (key: string, value: string) =>
     setFormState((prev) => ({ ...prev, [key]: value }));
@@ -313,9 +344,21 @@ export default function EditProfileScreen() {
     setSaving(true);
     try {
       const userRef = doc(firestore, 'users', user.uid);
+
+      const username = normalizeUsername(form.username || `${form.firstName}${form.lastName}`);
+      if (!username) {
+        throw new Error('Voer een geldige gebruikersnaam in.');
+      }
+
+      const available = await isUsernameAvailable(username, user.uid);
+      if (!available) {
+        throw new Error('Deze gebruikersnaam is al in gebruik. Kies een andere.');
+      }
+
       await setDoc(userRef, {
         firstName: form.firstName,
         lastName: form.lastName,
+        username,
         name: `${form.firstName} ${form.lastName}`.trim(),
         phone: form.phone,
         location: form.location,
