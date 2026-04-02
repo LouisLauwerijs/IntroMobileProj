@@ -8,6 +8,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -18,7 +19,8 @@ import {
   doc, 
   getDoc, 
   updateDoc, 
-  arrayUnion 
+  arrayUnion,
+  arrayRemove
 } from '../../firebase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ export default function MatchDetailScreen() {
   const [match, setMatch] = useState<Match | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     fetchMatch();
@@ -125,13 +128,11 @@ export default function MatchDetailScreen() {
 
     if (!match) return;
 
-    // Check of je al in de match zit
     if (match.playerIds.includes(user.uid)) {
       Alert.alert('Info', 'Je zit al in deze wedstrijd!');
       return;
     }
 
-    // Check of er nog plek is
     const emptyIndex = match.players.findIndex(p => !p.id);
     if (emptyIndex === -1) {
       Alert.alert('Fout', 'Deze wedstrijd is al vol.');
@@ -140,22 +141,20 @@ export default function MatchDetailScreen() {
 
     setJoining(true);
     try {
-      // 1. Haal de laatste user info op (voor de zekerheid)
       const userDoc = await getDoc(doc(firestore, 'users', user.uid));
       const userData = userDoc.exists() ? userDoc.data() : null;
       
       const newPlayer: Player = {
         id: user.uid,
-        name: userData?.name || user.displayName || 'Speler',
+        name: userData?.username || userData?.name || user.displayName || 'Speler',
         level: userData?.level || '?',
         team: match.players[emptyIndex].team,
+        avatar: userData?.avatar || ''
       };
 
-      // 2. Update de lokale players array
       const updatedPlayers = [...match.players];
       updatedPlayers[emptyIndex] = newPlayer;
 
-      // 3. Update Firestore
       const matchRef = doc(firestore, 'matches', match.id);
       const isNowFull = updatedPlayers.filter(p => !p.id).length === 0;
 
@@ -166,13 +165,62 @@ export default function MatchDetailScreen() {
       });
 
       Alert.alert('Succes', 'Je bent ingeschreven!');
-      fetchMatch(); // Refresh data
+      fetchMatch();
 
     } catch (error) {
       console.error('Error joining match:', error);
       Alert.alert('Fout', 'Kon niet inschrijven. Probeer het later opnieuw.');
     } finally {
       setJoining(false);
+    }
+  };
+
+  const handleLeave = async () => {
+    const user = auth.currentUser;
+    if (!user || !match) return;
+
+    const performLeave = async () => {
+      setLeaving(true);
+      try {
+        const updatedPlayers = [...match.players];
+        const userIndex = updatedPlayers.findIndex(p => p.id === user.uid);
+
+        if (userIndex !== -1) {
+          updatedPlayers[userIndex] = {
+            id: null,
+            name: null,
+            level: null,
+            team: updatedPlayers[userIndex].team
+          };
+
+          const matchRef = doc(firestore, 'matches', match.id);
+          await updateDoc(matchRef, {
+            players: updatedPlayers,
+            playerIds: arrayRemove(user.uid),
+            status: 'open'
+          });
+
+          if (Platform.OS !== 'web') Alert.alert('Succes', 'Je bent uitgeschreven.');
+          fetchMatch();
+        }
+      } catch (error) {
+        console.error('Error leaving match:', error);
+        Alert.alert('Fout', 'Kon niet uitschrijven. Probeer het later opnieuw.');
+      } finally {
+        setLeaving(false);
+      }
+    };
+
+    const confirmMsg = 'Weet je zeker dat je je wilt uitschrijven voor deze wedstrijd?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMsg)) {
+        await performLeave();
+      }
+    } else {
+      Alert.alert('Uitschrijven', confirmMsg, [
+        { text: 'Annuleren', style: 'cancel' },
+        { text: 'Uitschrijven', style: 'destructive', onPress: performLeave }
+      ]);
     }
   };
 
@@ -193,7 +241,6 @@ export default function MatchDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#333" />
@@ -205,8 +252,6 @@ export default function MatchDetailScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-
-        {/* Title block */}
         <View style={styles.titleBlock}>
           <View style={{ flex: 1 }}>
             <Text style={styles.courtName}>{match.club}</Text>
@@ -221,7 +266,6 @@ export default function MatchDetailScreen() {
           </View>
         </View>
 
-        {/* Info chips */}
         <View style={styles.infoRow}>
           {[
             { icon: 'calendar-outline', label: match.date },
@@ -236,7 +280,6 @@ export default function MatchDetailScreen() {
           ))}
         </View>
 
-        {/* Teams */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="people-outline" size={18} color="#00A86B" />
@@ -280,7 +323,6 @@ export default function MatchDetailScreen() {
           </View>
         </View>
 
-        {/* Level Box */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="trending-up-outline" size={18} color="#00A86B" />
@@ -294,7 +336,6 @@ export default function MatchDetailScreen() {
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* Bottom CTA */}
       <View style={styles.cta}>
         <TouchableOpacity 
           style={styles.cancelBtn} 
@@ -304,10 +345,20 @@ export default function MatchDetailScreen() {
         </TouchableOpacity>
         
         {isParticipant ? (
-          <View style={[styles.confirmBtn, { backgroundColor: '#f0faf6', borderWidth: 1, borderColor: '#00A86B' }]}>
-            <Text style={[styles.confirmBtnText, { color: '#00A86B' }]}>Al ingeschreven</Text>
-            <Ionicons name="checkmark-circle" size={18} color="#00A86B" />
-          </View>
+          <TouchableOpacity 
+            style={[styles.confirmBtn, { backgroundColor: '#FDECEA', borderWidth: 1, borderColor: '#E53935' }]} 
+            onPress={handleLeave}
+            disabled={leaving}
+          >
+            {leaving ? (
+              <ActivityIndicator color="#E53935" size="small" />
+            ) : (
+              <>
+                <Text style={[styles.confirmBtnText, { color: '#E53935' }]}>Uitschrijven</Text>
+                <Ionicons name="exit-outline" size={18} color="#E53935" />
+              </>
+            )}
+          </TouchableOpacity>
         ) : (
           <TouchableOpacity 
             style={[styles.confirmBtn, (spotsLeft === 0 || joining) && styles.disabledBtn]} 
@@ -329,200 +380,51 @@ export default function MatchDetailScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  backBtn: {
-    backgroundColor: '#fff',
-    padding: 8,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  shareBtn: {
-    backgroundColor: '#fff',
-    padding: 8,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  backBtn: { backgroundColor: '#fff', padding: 8, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  shareBtn: { backgroundColor: '#fff', padding: 8, borderRadius: 10, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
   headerTitle: { fontSize: 20, fontWeight: '800', color: '#1a1a1a' },
-
   scroll: { paddingBottom: 20 },
-
-  // Title
-  titleBlock: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    marginTop: 10,
-  },
+  titleBlock: { flexDirection: 'row', alignItems: 'flex-start', marginHorizontal: 16, marginBottom: 12, marginTop: 10 },
   courtName: { fontSize: 22, fontWeight: '800', color: '#1a1a1a', marginBottom: 4 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontSize: 13, color: '#999' },
   priceBox: { alignItems: 'flex-end', marginLeft: 12 },
   priceValue: { fontSize: 26, fontWeight: '900', color: '#00A86B' },
   priceUnit: { fontSize: 12, color: '#999', marginTop: -2 },
-
-  // Info chips
-  infoRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 14,
-  },
-  infoChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
+  infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginHorizontal: 16, marginBottom: 14 },
+  infoChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   infoChipText: { fontSize: 13, fontWeight: '600', color: '#444' },
-
-  // Card
-  card: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 14,
-  },
+  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 16, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a', flex: 1 },
-  spotsChip: {
-    backgroundColor: '#f0faf6',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: '#c3e6d8',
-  },
+  spotsChip: { backgroundColor: '#f0faf6', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#c3e6d8' },
   spotsChipText: { fontSize: 11, color: '#00A86B', fontWeight: '700' },
-
-  // Teams
   teamsWrap: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 14 },
   teamCol: { flex: 1, gap: 10 },
-  teamLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#bbb',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
+  teamLabel: { fontSize: 11, fontWeight: '700', color: '#bbb', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4, textAlign: 'center' },
   vsCol: { alignItems: 'center', justifyContent: 'center', paddingTop: 30 },
-  vsCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  vsCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' },
   vsText: { fontSize: 13, fontWeight: '900', color: '#bbb' },
-
-  playerTile: {
-    alignItems: 'center',
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
-    padding: 10,
-    gap: 6,
-  },
+  playerTile: { alignItems: 'center', backgroundColor: '#f8f8f8', borderRadius: 12, padding: 10, gap: 6 },
   playerTileEmpty: { borderWidth: 2, borderColor: '#eee', borderStyle: 'dashed', backgroundColor: '#fafafa' },
   playerAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#eee' },
-  emptyAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  emptyAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' },
   playerName: { fontSize: 11, fontWeight: '700', color: '#333', textAlign: 'center' },
-  levelChip: {
-    backgroundColor: '#e8f8f2',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
+  levelChip: { backgroundColor: '#e8f8f2', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   levelChipText: { fontSize: 11, color: '#00A86B', fontWeight: '800' },
-
   dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   dotFilled: { backgroundColor: '#00A86B' },
   dotEmpty: { backgroundColor: '#e0e0e0' },
   dotsLabel: { fontSize: 12, color: '#999', marginLeft: 4, fontWeight: '500' },
-
   levelText: { fontSize: 14, color: '#666', lineHeight: 20 },
-
-  // CTA
-  cta: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16,
-    paddingBottom: 28,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  cancelBtn: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: '#ddd',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
+  cta: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', flexDirection: 'row', gap: 12, padding: 16, paddingBottom: 28, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 10 },
+  cancelBtn: { flex: 1, borderWidth: 1.5, borderColor: '#ddd', borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   cancelBtnText: { fontSize: 15, fontWeight: '700', color: '#999' },
-  confirmBtn: {
-    flex: 2,
-    backgroundColor: '#00A86B',
-    borderRadius: 14,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
+  confirmBtn: { flex: 2, backgroundColor: '#00A86B', borderRadius: 14, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   disabledBtn: { backgroundColor: '#b2dfce' },
 });

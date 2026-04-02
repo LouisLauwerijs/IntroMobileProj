@@ -1,4 +1,3 @@
-
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth'; 
 import { 
@@ -13,12 +12,13 @@ import {
   onSnapshot,
   updateDoc,
   arrayUnion,
+  arrayRemove,
   increment,
   getDoc,
   getDocs,
   setDoc,
   deleteDoc
-  } from 'firebase/firestore';
+} from 'firebase/firestore';
 
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -56,6 +56,7 @@ export {
   onSnapshot,
   updateDoc,
   arrayUnion,
+  arrayRemove,
   increment,
   getDoc,
   getDocs,

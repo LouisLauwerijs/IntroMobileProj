@@ -4,18 +4,19 @@
 
 ✓ wedstijd aanmaken -> redirect + confirmatiemelding
 
- Prive optie bij wedstrijd aanmaken
+✓ Prive optie bij wedstrijd aanmaken
     -> enkel deelnemen via invite
 
 ✓ fix layout mathces tab
 
-reserveer baan moet dynamische data tonen - geen hardcoded bs
+ reserveer baan moet dynamische data tonen - geen hardcoded bs
     -> reservatie overbodig? hetzelfde als nieuwe match maken toch.
-    
+ ✓   -> reservatie verwijderd
+
 competitie -> moet ranglijst worden + hardcoded data verwijderen
 
-tournaments worden geimplementeerd -> Kobe
+✓ tournaments worden geimplementeerd -> Kobe
 
-half ✓ profiel niet meer hardcoded
+✓ profiel niet meer hardcoded
 
 Manier van resultaten van match ingeven implementeren
