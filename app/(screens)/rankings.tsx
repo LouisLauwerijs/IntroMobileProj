@@ -6,12 +6,23 @@ import {
   StyleSheet,
   SafeAreaView,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import {
+  auth,
+  firestore,
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  onAuthStateChanged,
+  where,
+} from '../../firebase';
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type Player = {
   id: string;
@@ -26,26 +37,13 @@ type Player = {
   trendAmt: number;
 };
 
-const PLAYERS: Player[] = [
-  { id: '1',  rank: 1,  name: 'Sophie Van den Berg', avatar: 'https://i.pravatar.cc/100?img=5',  level: 6.5, wins: 41, matches: 48, winRate: 85, trend: 'same', trendAmt: 0 },
-  { id: '2',  rank: 2,  name: 'Liam De Smedt',       avatar: 'https://i.pravatar.cc/100?img=12', level: 6.0, wins: 38, matches: 46, winRate: 83, trend: 'up',   trendAmt: 1 },
-  { id: '3',  rank: 3,  name: 'Emma Jacobs',          avatar: 'https://i.pravatar.cc/100?img=9',  level: 5.5, wins: 33, matches: 42, winRate: 79, trend: 'up',   trendAmt: 2 },
-  { id: '4',  rank: 4,  name: 'Noah Pieters',         avatar: 'https://i.pravatar.cc/100?img=15', level: 5.0, wins: 29, matches: 40, winRate: 73, trend: 'down', trendAmt: 1 },
-  { id: '5',  rank: 5,  name: 'Olivia Claes',         avatar: 'https://i.pravatar.cc/100?img=6',  level: 4.5, wins: 26, matches: 38, winRate: 68, trend: 'up',   trendAmt: 3 },
-  { id: '6',  rank: 6,  name: 'Alex Martens',         avatar: 'https://i.pravatar.cc/100?img=11', level: 3.5, wins: 31, matches: 48, winRate: 65, trend: 'up',   trendAmt: 1 },
-  { id: '7',  rank: 7,  name: 'Lars Wouters',         avatar: 'https://i.pravatar.cc/100?img=17', level: 3.5, wins: 22, matches: 36, winRate: 61, trend: 'down', trendAmt: 2 },
-  { id: '8',  rank: 8,  name: 'Ines Martens',         avatar: 'https://i.pravatar.cc/100?img=3',  level: 3.0, wins: 19, matches: 34, winRate: 56, trend: 'same', trendAmt: 0 },
-  { id: '9',  rank: 9,  name: 'Finn De Wolf',         avatar: 'https://i.pravatar.cc/100?img=20', level: 2.5, wins: 15, matches: 30, winRate: 50, trend: 'down', trendAmt: 1 },
-  { id: '10', rank: 10, name: 'Amelie Leclercq',      avatar: 'https://i.pravatar.cc/100?img=7',  level: 2.0, wins: 10, matches: 25, winRate: 40, trend: 'up',   trendAmt: 1 },
-];
-
-const CURRENT_USER_ID = '6'; // Alex Martens
-
 const TABS = ['Ranking', 'Niveau', 'Winratio'];
 
 // ─── Podium ───────────────────────────────────────────────────────────────────
 
 function Podium({ top3 }: { top3: Player[] }) {
+  if (top3.length < 3) return null;
+
   const [second, first, third] = [top3[1], top3[0], top3[2]];
 
   const podiumItem = (p: Player, height: number, medal: string, medalColor: string) => (
@@ -76,12 +74,117 @@ function Podium({ top3 }: { top3: Player[] }) {
 export default function RankingsScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Ranking');
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
-  const sorted = [...PLAYERS].sort((a, b) => {
+  // Auth state listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch players data
+  useEffect(() => {
+    if (!currentUser) {
+      setPlayers([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    // Fetch all users
+    const usersQuery = query(collection(firestore, 'users'), orderBy('level', 'desc'));
+    const usersUnsubscribe = onSnapshot(usersQuery, async (usersSnapshot) => {
+      const usersData = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      // For each user, fetch their matches to calculate stats
+      const playersWithStats = await Promise.all(
+        usersData.map(async (user) => {
+          const matchesQuery = query(
+            collection(firestore, 'matches'),
+            where('playerIds', 'array-contains', user.id)
+          );
+
+          const matchesSnapshot = await new Promise<any>((resolve) => {
+            const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
+              unsubscribe(); // Unsubscribe immediately after first fetch
+              resolve(snapshot);
+            });
+          });
+
+          // Calculate wins, losses, matches
+          let wins = 0;
+          let totalMatches = 0;
+
+          matchesSnapshot.docs.forEach((matchDoc) => {
+            const match = matchDoc.data();
+            const today = new Date().toISOString().split('T')[0];
+
+            // Only count completed matches (past dates)
+            if ((match.date || '') < today) {
+              totalMatches++;
+
+              const players = match.players || [];
+              const userPlayer = players.find((p: any) => p.id === user.id);
+              const userTeam = userPlayer?.team || 1;
+
+              // Check if user's team won
+              if (match.won === true && userTeam === 1) wins++;
+              else if (match.won === false && userTeam === 2) wins++;
+            }
+          });
+
+          const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+
+          return {
+            id: user.id,
+            rank: 0, // Will be calculated after sorting
+            name: user.name || 'Onbekende speler',
+            avatar: user.avatar || 'https://i.pravatar.cc/100?img=1',
+            level: user.level || 2.5,
+            wins,
+            matches: totalMatches,
+            winRate,
+            trend: 'same' as const,
+            trendAmt: 0,
+          };
+        })
+      );
+
+      // Sort by level for initial ranking and assign ranks
+      const sortedByLevel = [...playersWithStats].sort((a, b) => b.level - a.level);
+      const playersWithRanks = sortedByLevel.map((player, index) => ({
+        ...player,
+        rank: index + 1,
+      }));
+
+      setPlayers(playersWithRanks);
+      setLoading(false);
+    });
+
+    return () => usersUnsubscribe();
+  }, [currentUser]);
+
+  const sorted = [...players].sort((a, b) => {
     if (activeTab === 'Niveau') return b.level - a.level;
     if (activeTab === 'Winratio') return b.winRate - a.winRate;
     return a.rank - b.rank;
   });
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00A86B" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -97,7 +200,7 @@ export default function RankingsScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* Podium */}
-        <Podium top3={PLAYERS.slice(0, 3)} />
+        <Podium top3={players.slice(0, 3)} />
 
         {/* Tabs */}
         <View style={styles.tabs}>
@@ -114,9 +217,9 @@ export default function RankingsScreen() {
 
         {/* My rank banner */}
         {(() => {
-          const me = sorted.find((p) => p.id === CURRENT_USER_ID);
-          const myRank = sorted.findIndex((p) => p.id === CURRENT_USER_ID) + 1;
-          if (!me) return null;
+          const me = sorted.find((p) => p.id === currentUser?.uid);
+          const myRank = sorted.findIndex((p) => p.id === currentUser?.uid) + 1;
+          if (!me || !currentUser) return null;
           return (
             <View style={styles.myRankBanner}>
               <Ionicons name="person-circle-outline" size={18} color="#00A86B" />
@@ -133,7 +236,7 @@ export default function RankingsScreen() {
         {/* Player list */}
         <View style={styles.listWrap}>
           {sorted.map((player, idx) => {
-            const isMe = player.id === CURRENT_USER_ID;
+            const isMe = player.id === currentUser?.uid;
             const pos = idx + 1;
             return (
               <View
@@ -148,52 +251,56 @@ export default function RankingsScreen() {
                       pos === 1 && { color: '#FFD700' },
                       pos === 2 && { color: '#C0C0C0' },
                       pos === 3 && { color: '#CD7F32' },
-                    ]}>#{pos}</Text>
+                    ]}>
+                      #{pos}
+                    </Text>
                   ) : (
-                    <Text style={styles.rankNormal}>#{pos}</Text>
+                    <Text style={styles.rankNum}>{pos}</Text>
+                  )}
+                  {player.trend !== 'same' && (
+                    <View style={styles.trendWrap}>
+                      <Ionicons
+                        name={player.trend === 'up' ? 'trending-up' : 'trending-down'}
+                        size={12}
+                        color={player.trend === 'up' ? '#00A86B' : '#E53935'}
+                      />
+                      <Text style={[
+                        styles.trendText,
+                        { color: player.trend === 'up' ? '#00A86B' : '#E53935' }
+                      ]}>
+                        {player.trendAmt}
+                      </Text>
+                    </View>
                   )}
                 </View>
 
-                {/* Avatar */}
-                <Image source={{ uri: player.avatar }} style={styles.rowAvatar} />
-
-                {/* Info */}
+                {/* Avatar & Info */}
+                <Image source={{ uri: player.avatar }} style={styles.playerAvatar} />
                 <View style={styles.playerInfo}>
-                  <Text style={[styles.playerName, isMe && styles.playerNameMe]}>
-                    {player.name}{isMe ? ' (jij)' : ''}
+                  <Text style={[styles.playerName, isMe && styles.playerNameMe]} numberOfLines={1}>
+                    {player.name}
                   </Text>
-                  <Text style={styles.playerStats}>
-                    {player.wins}W / {player.matches - player.wins}V · {player.winRate}%
-                  </Text>
+                  <Text style={styles.playerLevel}>Niveau {player.level.toFixed(1)}</Text>
                 </View>
 
-                {/* Level + trend */}
-                <View style={styles.playerRight}>
-                  <Text style={styles.playerLevel}>{player.level.toFixed(1)}</Text>
-                  <View style={styles.trendRow}>
-                    {player.trend === 'up' && (
-                      <>
-                        <Ionicons name="arrow-up" size={11} color="#00A86B" />
-                        <Text style={[styles.trendText, { color: '#00A86B' }]}>+{player.trendAmt}</Text>
-                      </>
-                    )}
-                    {player.trend === 'down' && (
-                      <>
-                        <Ionicons name="arrow-down" size={11} color="#E53935" />
-                        <Text style={[styles.trendText, { color: '#E53935' }]}>-{player.trendAmt}</Text>
-                      </>
-                    )}
-                    {player.trend === 'same' && (
-                      <Text style={[styles.trendText, { color: '#bbb' }]}>—</Text>
-                    )}
-                  </View>
+                {/* Stats */}
+                <View style={styles.statsCol}>
+                  <Text style={styles.statNum}>{player.wins}</Text>
+                  <Text style={styles.statLabel}>Wins</Text>
+                </View>
+                <View style={styles.statsCol}>
+                  <Text style={styles.statNum}>{player.matches}</Text>
+                  <Text style={styles.statLabel}>Matches</Text>
+                </View>
+                <View style={styles.statsCol}>
+                  <Text style={styles.statNum}>{player.winRate}%</Text>
+                  <Text style={styles.statLabel}>Winrate</Text>
                 </View>
               </View>
             );
           })}
         </View>
 
-        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );

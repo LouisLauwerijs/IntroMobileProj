@@ -22,17 +22,6 @@ import {
 
 const TABS = ['Rankings', 'Tournaments', 'Leagues'];
 
-const rankings = [
-  { rank: 1, name: 'Roel Maes',      level: '4.5', wins: 32, matches: 40, winRate: 80, change: 'up',   avatar: 'R', points: 1840 },
-  { rank: 2, name: 'Kaat De Smedt', level: '4.5', wins: 28, matches: 36, winRate: 78, change: 'up',   avatar: 'K', points: 1780 },
-  { rank: 3, name: 'Marc Peeters',  level: '4.0', wins: 25, matches: 34, winRate: 74, change: 'same', avatar: 'M', points: 1720 },
-  { rank: 4, name: 'Alex Janssen',  level: '3.5', wins: 18, matches: 24, winRate: 75, change: 'up',   avatar: 'A', points: 1520, isMe: true },
-  { rank: 5, name: 'Tom Vervloet',  level: '3.5', wins: 17, matches: 25, winRate: 68, change: 'down', avatar: 'T', points: 1490 },
-  { rank: 6, name: 'Lisa Bogaert',  level: '3.5', wins: 16, matches: 24, winRate: 67, change: 'down', avatar: 'L', points: 1460 },
-  { rank: 7, name: 'Nina Claeys',   level: '3.0', wins: 14, matches: 22, winRate: 64, change: 'up',   avatar: 'N', points: 1380 },
-  { rank: 8, name: 'Sarah Willems', level: '3.0', wins: 12, matches: 20, winRate: 60, change: 'same', avatar: 'S', points: 1310 },
-];
-
 const INITIAL_TOURNAMENTS = [
   {
     id: '1', name: 'Antwerp Open',
@@ -68,6 +57,8 @@ export default function TournamentsScreen() {
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [popupMessage, setPopupMessage] = useState<string | null>(null);
+  const [rankings, setRankings] = useState<any[]>([]);
+  const [rankingsLoading, setRankingsLoading] = useState(true);
   const currentUser = auth.currentUser;
 
   // Load tournaments from Firestore
@@ -94,6 +85,94 @@ export default function TournamentsScreen() {
 
     return () => unsubscribe();
   }, []);
+
+  // Load rankings from users and matches
+  useEffect(() => {
+    if (!currentUser) {
+      setRankings([]);
+      setRankingsLoading(false);
+      return;
+    }
+
+    setRankingsLoading(true);
+
+    // Fetch all users
+    const usersQuery = query(collection(firestore, 'users'), orderBy('level', 'desc'));
+    const usersUnsubscribe = onSnapshot(usersQuery, async (usersSnapshot) => {
+      const usersData = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      // For each user, fetch their matches to calculate stats
+      const playersWithStats = await Promise.all(
+        usersData.map(async (user: any) => {
+          const matchesQuery = query(
+            collection(firestore, 'matches'),
+            where('playerIds', 'array-contains', user.id)
+          );
+
+          const matchesSnapshot = await new Promise<any>((resolve) => {
+            const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
+              unsubscribe(); // Unsubscribe immediately after first fetch
+              resolve(snapshot);
+            });
+          });
+
+          // Calculate wins, losses, matches
+          let wins = 0;
+          let totalMatches = 0;
+
+          matchesSnapshot.docs.forEach((matchDoc: any) => {
+            const match = matchDoc.data();
+            const today = new Date().toISOString().split('T')[0];
+
+            // Only count completed matches (past dates)
+            if ((match.date || '') < today) {
+              totalMatches++;
+
+              const players = match.players || [];
+              const userPlayer = players.find((p: any) => p.id === user.id);
+              const userTeam = userPlayer?.team || 1;
+
+              // Check if user's team won
+              if (match.won === true && userTeam === 1) wins++;
+              else if (match.won === false && userTeam === 2) wins++;
+            }
+          });
+
+          const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+          const points = Math.round(user.level * 400 + wins * 10 + winRate * 2); // Simple points calculation
+
+          return {
+            id: user.id,
+            rank: 0, // Will be calculated after sorting
+            name: user.name || 'Onbekende speler',
+            level: user.level?.toFixed(1) || '2.5',
+            wins,
+            matches: totalMatches,
+            winRate,
+            change: 'same' as const,
+            avatar: (user.name || 'O')[0].toUpperCase(),
+            points,
+            isMe: user.id === currentUser.uid,
+          };
+        })
+      );
+
+      // Sort by points for ranking
+      const sortedByPoints = [...playersWithStats].sort((a, b) => b.points - a.points);
+      const playersWithRanks = sortedByPoints.map((player, index) => ({
+        ...player,
+        rank: index + 1,
+      }));
+
+      setRankings(playersWithRanks);
+      setRankingsLoading(false);
+    });
+
+    return () => usersUnsubscribe();
+  }, [currentUser]);
 
   const handleRegister = async (tournament: any) => {
     if (!currentUser) {
@@ -224,29 +303,52 @@ export default function TournamentsScreen() {
         {activeTab === 0 && (
           <>
             {/* My rank banner */}
-            <View style={styles.myRankCard}>
-              <View style={styles.myRankLeft}>
-                <Text style={styles.myRankLabel}>JOUW RANKING</Text>
-                <Text style={styles.myRankValue}>#4</Text>
-                <Text style={styles.myRankSub}>+2 posities deze maand</Text>
+            {rankingsLoading ? (
+              <View style={[styles.myRankCard, { justifyContent: 'center', alignItems: 'center' }]}>
+                <ActivityIndicator size="small" color="#00A86B" />
               </View>
-              <View style={styles.myRankRight}>
-                <Text style={styles.myPoints}>1520</Text>
-                <Text style={styles.myPointsLabel}>punten</Text>
-              </View>
-            </View>
+            ) : (
+              (() => {
+                const me = rankings.find((p) => p.isMe);
+                return me ? (
+                  <View style={styles.myRankCard}>
+                    <View style={styles.myRankLeft}>
+                      <Text style={styles.myRankLabel}>JOUW RANKING</Text>
+                      <Text style={styles.myRankValue}>#{me.rank}</Text>
+                      <Text style={styles.myRankSub}>
+                        {me.change === 'up' ? '+' : me.change === 'down' ? '-' : ''}
+                        {me.change !== 'same' ? '1 positie deze maand' : 'Geen verandering'}
+                      </Text>
+                    </View>
+                    <View style={styles.myRankRight}>
+                      <Text style={styles.myPoints}>{me.points}</Text>
+                      <Text style={styles.myPointsLabel}>punten</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={[styles.myRankCard, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ color: '#666' }}>Geen ranking data beschikbaar</Text>
+                  </View>
+                );
+              })()
+            )}
 
             {/* Leaderboard */}
-            <View style={styles.leaderboard}>
-              {rankings.map((player, idx) => (
-                <View
-                  key={player.rank}
-                  style={[
-                    styles.rankRow,
-                    player.isMe && styles.rankRowMe,
-                    idx < rankings.length - 1 && styles.rankRowBorder,
-                  ]}
-                >
+            {rankingsLoading ? (
+              <View style={[styles.leaderboard, { justifyContent: 'center', alignItems: 'center', paddingVertical: 40 }]}>
+                <ActivityIndicator size="small" color="#00A86B" />
+              </View>
+            ) : (
+              <View style={styles.leaderboard}>
+                {rankings.map((player, idx) => (
+                  <View
+                    key={player.id}
+                    style={[
+                      styles.rankRow,
+                      player.isMe && styles.rankRowMe,
+                      idx < rankings.length - 1 && styles.rankRowBorder,
+                    ]}
+                  >
                   {/* Rank */}
                   <View style={styles.rankNumCol}>
                     {player.rank <= 3
@@ -284,7 +386,8 @@ export default function TournamentsScreen() {
                   </View>
                 </View>
               ))}
-            </View>
+              </View>
+            )}
           </>
         )}
 
@@ -612,8 +715,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-
-  emptyState: { alignItems: 'center', paddingVertical: 60, gap: 10 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: '#999' },
-  emptySub: { fontSize: 13, color: '#bbb', textAlign: 'center' },
 });
