@@ -21,7 +21,13 @@ import {
   updateDoc, 
   arrayUnion,
   arrayRemove,
-  deleteDoc
+  deleteDoc,
+  addDoc,
+  collection,
+  getDocs,
+  where,
+  query,
+  serverTimestamp
 } from '../../firebase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -48,6 +54,19 @@ type Match = {
   status: string;
   isMixed: boolean;
   isCompetitive: boolean;
+  isPrivate?: boolean;
+};
+
+type JoinRequest = {
+  id: string;
+  matchId: string;
+  userId: string;
+  userName?: string;
+  userLevel?: string | number;
+  userAvatar?: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: any;
+  requestedTeam: 1 | 2;
 };
 
 // ─── Player Tile ──────────────────────────────────────────────────────────────
@@ -97,6 +116,8 @@ export default function MatchDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [pendingRequest, setPendingRequest] = useState<JoinRequest | null>(null);
+  const [checkingRequest, setCheckingRequest] = useState(false);
 
   useEffect(() => {
     fetchMatch();
@@ -137,6 +158,11 @@ export default function MatchDetailScreen() {
               }
             }
           }
+
+          // Check for pending join request if match is private
+          if (data.isPrivate) {
+            await checkForPendingRequest(docSnap.id as string, user.uid);
+          }
         }
       } else {
         Alert.alert('Fout', 'Wedstrijd niet gevonden.');
@@ -146,6 +172,105 @@ export default function MatchDetailScreen() {
       console.error('Error fetching match:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkForPendingRequest = async (matchId: string, userId: string) => {
+    try {
+      const q = query(
+        collection(firestore, 'joinRequests'),
+        where('matchId', '==', matchId),
+        where('userId', '==', userId),
+        where('status', '==', 'pending')
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        setPendingRequest({ id: snap.docs[0].id, ...snap.docs[0].data() } as JoinRequest);
+      } else {
+        setPendingRequest(null);
+      }
+    } catch (error) {
+      console.error('Error checking pending request:', error);
+    }
+  };
+
+  const handleJoinRequest = async () => {
+    const user = auth.currentUser;
+    if (!user || !match) return;
+
+    setJoining(true);
+    try {
+      const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+      const userData = userDoc.exists() ? userDoc.data() : null;
+
+      const emptyIndex = match.players.findIndex(p => !p.id);
+      if (emptyIndex === -1) {
+        Alert.alert('Fout', 'Deze wedstrijd is al vol.');
+        setJoining(false);
+        return;
+      }
+
+      const requestedTeam = match.players[emptyIndex].team;
+
+      const joinRequestData = {
+        matchId: match.id,
+        userId: user.uid,
+        userName: userData?.username || user.displayName || user.email?.split('@')[0] || 'Speler',
+        userLevel: userData?.level || '?',
+        userAvatar: userData?.avatar || '',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        requestedTeam: requestedTeam as 1 | 2
+      };
+
+      const docRef = await addDoc(collection(firestore, 'joinRequests'), joinRequestData);
+
+      // Create notification for match creator
+      await addDoc(collection(firestore, 'notifications'), {
+        userId: match.createdBy,
+        type: 'join_request',
+        status: 'unread',
+        requestId: docRef.id,
+        matchId: match.id,
+        matchClub: match.club,
+        matchDate: match.date,
+        matchTime: match.time,
+        requesterName: joinRequestData.userName,
+        requesterLevel: joinRequestData.userLevel,
+        requesterAvatar: joinRequestData.userAvatar,
+        createdAt: serverTimestamp(),
+        title: 'Nieuw verzoek om toe te treden',
+        body: `${joinRequestData.userName} (niveau ${joinRequestData.userLevel}) vraagt om in te schrijven voor je wedstrijd op ${match.club}.`,
+      });
+
+      setPendingRequest({ 
+        id: docRef.id, 
+        ...joinRequestData 
+      } as JoinRequest);
+      Alert.alert('Succes', 'Je aanvraag is verzonden! De match-creator zal je verzoek beoordelen.');
+
+    } catch (error) {
+      console.error('Error sending join request:', error);
+      Alert.alert('Fout', 'Kon je aanvraag niet versturen. Probeer het later opnieuw.');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleCancelRequest = async () => {
+    const user = auth.currentUser;
+    if (!user || !pendingRequest) return;
+
+    setJoining(true);
+    try {
+      await deleteDoc(doc(firestore, 'joinRequests', pendingRequest.id));
+      setPendingRequest(null);
+      Alert.alert('Succes', 'Je aanvraag is ingetrokken.');
+    } catch (error) {
+      console.error('Error canceling request:', error);
+      Alert.alert('Fout', 'Kon je aanvraag niet intrekken. Probeer het later opnieuw.');
+    } finally {
+      setJoining(false);
     }
   };
 
@@ -160,6 +285,12 @@ export default function MatchDetailScreen() {
 
     if (match.playerIds.includes(user.uid)) {
       Alert.alert('Info', 'Je zit al in deze wedstrijd!');
+      return;
+    }
+
+    // For private matches, send a request instead
+    if (match.isPrivate) {
+      await handleJoinRequest();
       return;
     }
 
@@ -317,7 +448,8 @@ export default function MatchDetailScreen() {
             { icon: 'time-outline',     label: match.time },
             { icon: 'trophy-outline',    label: match.isCompetitive ? 'Competitief' : 'Vriendschappelijk' },
             { icon: 'tennisball-outline', label: 'Padel' },
-          ].map((chip, idx) => (
+            match.isPrivate && { icon: 'lock-closed-outline', label: 'Privé' },
+          ].filter(Boolean).map((chip, idx) => (
             <View key={idx} style={styles.infoChip}>
               <Ionicons name={chip.icon as any} size={15} color="#00A86B" />
               <Text style={styles.infoChipText}>{chip.label}</Text>
@@ -404,6 +536,21 @@ export default function MatchDetailScreen() {
               </>
             )}
           </TouchableOpacity>
+        ) : pendingRequest ? (
+          <TouchableOpacity 
+            style={[styles.confirmBtn, { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#F5A623' }]} 
+            onPress={handleCancelRequest}
+            disabled={joining}
+          >
+            {joining ? (
+              <ActivityIndicator color="#F5A623" size="small" />
+            ) : (
+              <>
+                <Text style={[styles.confirmBtnText, { color: '#F5A623' }]}>Intrekken</Text>
+                <Ionicons name="hourglass-outline" size={18} color="#F5A623" />
+              </>
+            )}
+          </TouchableOpacity>
         ) : (
           <TouchableOpacity 
             style={[styles.confirmBtn, (spotsLeft === 0 || joining) && styles.disabledBtn]} 
@@ -414,8 +561,14 @@ export default function MatchDetailScreen() {
               <ActivityIndicator color="#fff" size="small" />
             ) : (
               <>
-                <Text style={styles.confirmBtnText}>Inschrijven</Text>
-                <Ionicons name="person-add-outline" size={18} color="#fff" />
+                <Text style={styles.confirmBtnText}>
+                  {match.isPrivate ? 'Aanvragen' : 'Inschrijven'}
+                </Text>
+                <Ionicons 
+                  name={match.isPrivate ? "send-outline" : "person-add-outline"} 
+                  size={18} 
+                  color="#fff" 
+                />
               </>
             )}
           </TouchableOpacity>

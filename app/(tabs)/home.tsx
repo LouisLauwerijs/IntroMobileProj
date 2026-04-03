@@ -5,7 +5,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import { auth, firestore, doc, getDoc, onAuthStateChanged } from '../../firebase';
+import { 
+  auth, 
+  firestore, 
+  doc, 
+  getDoc, 
+  onAuthStateChanged,
+  collection,
+  query,
+  where,
+  onSnapshot
+} from '../../firebase';
 
 const upcomingMatches = [
   { id: '1', court: 'Court A', time: 'Today, 6:00 PM', players: '3/4', sport: 'Padel' },
@@ -22,9 +32,10 @@ export default function HomeScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [userName, setUserName] = useState('Speler');
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
           const userDoc = await getDoc(doc(firestore, 'users', user.uid));
@@ -37,9 +48,23 @@ export default function HomeScreen() {
         } catch (error) {
           console.error('Error fetching user name:', error);
         }
+
+        // Set up real-time listener for unread notifications
+        const q = query(
+          collection(firestore, 'notifications'),
+          where('userId', '==', user.uid),
+          where('status', '==', 'unread')
+        );
+
+        const unsubscribeNotifs = onSnapshot(q, (snapshot) => {
+          setUnreadNotificationCount(snapshot.size);
+        });
+
+        return () => unsubscribeNotifs();
       }
     });
-    return () => unsubscribe();
+
+    return () => unsubscribeAuth();
   }, []);
 
   const quickActions = [
@@ -60,9 +85,11 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={() => router.push('/(screens)/notifications')}>
             <View>
               <Ionicons name="notifications-outline" size={26} color="#333" />
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>3</Text>
-              </View>
+              {unreadNotificationCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unreadNotificationCount}</Text>
+                </View>
+              )}
             </View>
           </TouchableOpacity>
         </View>

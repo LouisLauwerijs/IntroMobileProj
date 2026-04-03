@@ -4,6 +4,7 @@
 ✓ wedstijd aanmaken -> redirect + confirmatiemelding
 ✓ Prive optie bij wedstrijd aanmaken
     -> enkel deelnemen via invite
+    (heb gedaan dat je een aanvraag moet indienen)
 ✓ fix layout mathces tab
  reserveer baan moet dynamische data tonen - geen hardcoded bs
     -> reservatie overbodig? hetzelfde als nieuwe match maken toch.
