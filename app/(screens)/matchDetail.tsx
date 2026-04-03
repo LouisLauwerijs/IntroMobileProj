@@ -20,7 +20,8 @@ import {
   getDoc, 
   updateDoc, 
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  deleteDoc
 } from '../../firebase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -107,7 +108,36 @@ export default function MatchDetailScreen() {
       const docRef = doc(firestore, 'matches', id as string);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        setMatch({ id: docSnap.id, ...docSnap.data() } as Match);
+        const data = docSnap.data() as Match;
+        setMatch({ id: docSnap.id, ...data } as Match);
+
+        // Self-healing logic: If current user is a participant, ensure their info is up-to-date
+        const user = auth.currentUser;
+        if (user) {
+          const players = data.players || [];
+          const userIndex = players.findIndex(p => p.id === user.uid);
+          if (userIndex !== -1) {
+            const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              const latestName = userData.username || user.displayName || 'Speler';
+              const latestAvatar = userData.avatar || '';
+              
+              if (players[userIndex].name !== latestName || players[userIndex].avatar !== latestAvatar) {
+                console.log('Updating stale user info in match document...');
+                const updatedPlayers = [...players];
+                updatedPlayers[userIndex] = {
+                  ...updatedPlayers[userIndex],
+                  name: latestName,
+                  avatar: latestAvatar
+                };
+                await updateDoc(docRef, { players: updatedPlayers });
+                // Re-fetch or update local state
+                setMatch(prev => prev ? { ...prev, players: updatedPlayers } : null);
+              }
+            }
+          }
+        }
       } else {
         Alert.alert('Fout', 'Wedstrijd niet gevonden.');
         router.back();
@@ -146,7 +176,7 @@ export default function MatchDetailScreen() {
       
       const newPlayer: Player = {
         id: user.uid,
-        name: userData?.username || userData?.name || user.displayName || 'Speler',
+        name: userData?.username || user.displayName || user.email?.split('@')[0] || 'Speler',
         level: userData?.level || '?',
         team: match.players[emptyIndex].team,
         avatar: userData?.avatar || ''
@@ -200,6 +230,15 @@ export default function MatchDetailScreen() {
           };
 
           const matchRef = doc(firestore, 'matches', match.id);
+          const noPlayersLeft = updatedPlayers.every(p => p.id === null);
+
+          if (noPlayersLeft) {
+            await deleteDoc(matchRef);
+            if (Platform.OS !== 'web') Alert.alert('Succes', 'Wedstrijd verwijderd omdat er geen spelers meer zijn.');
+            router.back();
+            return;
+          }
+
           await updateDoc(matchRef, {
             players: updatedPlayers,
             playerIds: arrayRemove(user.uid),

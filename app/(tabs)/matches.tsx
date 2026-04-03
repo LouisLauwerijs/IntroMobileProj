@@ -60,6 +60,7 @@ type MyMatch = {
   won: boolean | null;
   court: string;
   players: string[];
+  playerData?: any[];
 };
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ export default function MatchesScreen() {
             id:     p.id     ?? null,
             name:   p.name   ?? null,
             level:  p.level  ? String(p.level) : null,
-            avatar: p.name   ? (p.name as string)[0].toUpperCase() : null,
+            avatar: p.avatar ?? '', // Keep URL if it exists
             team:   p.team,
           })),
           playerIds:     d.playerIds ?? [], // Belangrijk voor checks
@@ -163,7 +164,8 @@ export default function MatchesScreen() {
           court:   d.court  ?? 'Baan 1',
           players: (d.players ?? [])
             .filter((p: any) => p.name)
-            .map((p: any) => p.name as string),
+            .map((p: any) => p.name as string), // Still keeping this for simple array of names if needed elsewhere
+          playerData: (d.players ?? []).filter((p: any) => p.name), // Added for detailed rendering
         };
       });
       setMyMatches(fetched);
@@ -276,10 +278,11 @@ export default function MatchesScreen() {
                         {p.name ? (
                           <>
                             <View style={styles.playerAvatar}>
-                              <Text style={styles.playerAvatarText}>{p.avatar}</Text>
+                              <Text style={styles.playerAvatarText}>
+                                {p.name ? (p.name as string)[0].toUpperCase() : '?'}
+                              </Text>
                             </View>
-                            <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text>
-                            <Text style={styles.playerLevel}>{p.level}</Text>
+                            <Text style={styles.playerName} >{p.name}</Text>
                           </>
                         ) : (
                           <>
@@ -345,8 +348,14 @@ export default function MatchesScreen() {
                 {match.players.map((p, i) => (
                   <View key={i} style={[styles.playerSlot, !p.name && styles.playerSlotOpen]}>
                     {p.name ? (
-                      <><View style={styles.playerAvatar}><Text style={styles.playerAvatarText}>{p.avatar}</Text></View>
-                      <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text></>
+                      <>
+                        <View style={styles.playerAvatar}>
+                          <Text style={styles.playerAvatarText}>
+                            {p.name ? (p.name as string)[0].toUpperCase() : '?'}
+                          </Text>
+                        </View>
+                        <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text>
+                      </>
                     ) : (
                       <><View style={styles.playerAvatarOpen}><Ionicons name="lock-closed" size={14} color="#ccc" /></View>
                       <Text style={styles.playerOpenText}>Privé</Text></>
@@ -386,12 +395,18 @@ export default function MatchesScreen() {
                 )}
               </View>
               <View style={styles.myPlayersRow}>
-                {match.players.map((name, i) => (
-                  <View key={i} style={styles.myPlayer}>
-                    <View style={[styles.myAvatar, i < 2 && styles.myAvatarTeam1]}><Text style={styles.myAvatarText}>{name[0]}</Text></View>
-                    <Text style={styles.myPlayerName}>{name}</Text>
-                  </View>
-                ))}
+                {(match.playerData || match.players).map((p, i) => {
+                  const name = typeof p === 'string' ? p : p.name;
+                  const initial = name ? name[0].toUpperCase() : '?';
+                  return (
+                    <View key={i} style={styles.myPlayer}>
+                      <View style={[styles.myAvatar, i < 2 && styles.myAvatarTeam1]}>
+                        <Text style={styles.myAvatarText}>{initial}</Text>
+                      </View>
+                      <Text style={styles.myPlayerName}>{name}</Text>
+                    </View>
+                  );
+                })}
               </View>
             </TouchableOpacity>
           ))

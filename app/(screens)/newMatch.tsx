@@ -17,7 +17,11 @@ import {
   firestore, 
   collection, 
   addDoc, 
-  serverTimestamp 
+  serverTimestamp,
+  doc,
+  getDoc,
+  updateDoc,
+  arrayUnion
 } from '../../firebase';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -79,12 +83,16 @@ export default function NewMatchScreen() {
 
     setLoading(true);
     try {
+      const userDoc = await getDoc(doc(firestore, 'users', user.uid));
+      const userData = userDoc.exists() ? userDoc.data() : null;
+
       // Current user is the first player (Team 1)
       const creatorPlayer = {
         id: user.uid,
-        name: user.displayName || user.email?.split('@')[0] || 'Speler',
-        level: '?', // Fetch from user profile in a real app
+        name: userData?.username || user.displayName || user.email?.split('@')[0] || 'Speler',
+        level: userData?.level || '?',
         team: 1,
+        avatar: userData?.avatar || '',
       };
 
       // Create 3 empty slots
