@@ -66,6 +66,7 @@ export default function HomeScreen() {
         const qMatches = query(
           collection(firestore, 'matches'),
           where('playerIds', 'array-contains', user.uid),
+          where('status', 'in', ['open', 'full']),
           orderBy('createdAt', 'desc'),
           limit(3)
         );
@@ -116,7 +117,7 @@ export default function HomeScreen() {
 
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Goede morgen 👋</Text>
+            <Text style={styles.greeting}>Goede morgen</Text>
             <Text style={styles.username}>{userName}</Text> 
           </View>
           <TouchableOpacity onPress={() => router.push('/(screens)/notifications')}>
