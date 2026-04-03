@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth'; // Added for listener
 import {
   auth,
@@ -67,9 +67,20 @@ type MyMatch = {
 
 export default function MatchesScreen() {
   const router = useRouter();
+  const { tab } = useLocalSearchParams();
   const [activeTab,   setActiveTab]   = useState(0);
   const [activeLevel, setActiveLevel] = useState(0);
   const [currentUser, setCurrentUser] = useState(auth.currentUser);
+
+  // Set active tab from params
+  useEffect(() => {
+    if (tab !== undefined) {
+      const tabIndex = parseInt(tab as string);
+      if (!isNaN(tabIndex) && tabIndex >= 0 && tabIndex < TABS.length) {
+        setActiveTab(tabIndex);
+      }
+    }
+  }, [tab]);
 
   // Firestore data
   const [openMatches,    setOpenMatches]    = useState<Match[]>([]);

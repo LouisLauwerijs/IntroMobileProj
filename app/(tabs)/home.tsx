@@ -1,7 +1,14 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, TextInput, SafeAreaView,
+  StyleSheet, TextInput, SafeAreaView, ActivityIndicator,
 } from 'react-native';
+
+const nearbyCourts = [
+  { id: '1', name: 'City Padel Club', distance: '0.5 km', available: 3 },
+  { id: '2', name: 'Riverside Padel', distance: '1.2 km', available: 1 },
+  { id: '3', name: 'Central Sports Hub', distance: '2.0 km', available: 5 },
+];
+
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
@@ -14,27 +21,22 @@ import {
   collection,
   query,
   where,
-  onSnapshot
+  onSnapshot,
+  orderBy,
+  limit
 } from '../../firebase';
-
-const upcomingMatches = [
-  { id: '1', court: 'Court A', time: 'Today, 6:00 PM', players: '3/4', sport: 'Padel' },
-  { id: '2', court: 'Court B', time: 'Tomorrow, 10:00 AM', players: '2/4', sport: 'Padel' },
-];
-
-const nearbyCourts = [
-  { id: '1', name: 'City Padel Club', distance: '0.5 km', available: 3 },
-  { id: '2', name: 'Riverside Padel', distance: '1.2 km', available: 1 },
-  { id: '3', name: 'Central Sports Hub', distance: '2.0 km', available: 5 },
-];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
   const [userName, setUserName] = useState('Speler');
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [userMatches, setUserMatches] = useState<any[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(true);
 
   useEffect(() => {
+    let unsubscribeNotifs: () => void;
+    let unsubscribeMatches: () => void;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
@@ -50,21 +52,56 @@ export default function HomeScreen() {
         }
 
         // Set up real-time listener for unread notifications
-        const q = query(
+        const qNotifs = query(
           collection(firestore, 'notifications'),
           where('userId', '==', user.uid),
           where('status', '==', 'unread')
         );
 
-        const unsubscribeNotifs = onSnapshot(q, (snapshot) => {
+        unsubscribeNotifs = onSnapshot(qNotifs, (snapshot) => {
           setUnreadNotificationCount(snapshot.size);
         });
 
-        return () => unsubscribeNotifs();
+        // Set up real-time listener for USER matches
+        const qMatches = query(
+          collection(firestore, 'matches'),
+          where('playerIds', 'array-contains', user.uid),
+          orderBy('createdAt', 'desc'),
+          limit(3)
+        );
+
+        unsubscribeMatches = onSnapshot(qMatches, (snapshot) => {
+          const fetched = snapshot.docs.map((docSnap) => {
+            const d = docSnap.data();
+            const players = d.players ?? [];
+            const joinedCount = players.filter((p: any) => p.name).length;
+            
+            return {
+              id: docSnap.id,
+              court: d.club || d.court || 'Baan',
+              time: `${d.date || ''} om ${d.time || ''}`,
+              players: `${joinedCount}/${players.length || 4}`,
+              sport: 'Padel', // Default sport
+            };
+          });
+          setUserMatches(fetched);
+          setLoadingMatches(false);
+        }, (err) => {
+          console.error('Error fetching user matches:', err);
+          setLoadingMatches(false);
+        });
+      } else {
+        setUserName('Speler');
+        setUserMatches([]);
+        setLoadingMatches(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeNotifs) unsubscribeNotifs();
+      if (unsubscribeMatches) unsubscribeMatches();
+    };
   }, []);
 
   const quickActions = [
@@ -113,24 +150,41 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Komende matches</Text>
-        {upcomingMatches.map((match) => (
-          <TouchableOpacity
-            key={match.id}
-            style={styles.matchCard}
-            onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
-          >
-            <View>
-              <Text style={styles.matchCourt}>{match.court}</Text>
-              <Text style={styles.matchTime}>{match.time}</Text>
-              <Text style={styles.matchSport}>{match.sport}</Text>
-            </View>
-            <View style={styles.matchRight}>
-              <Ionicons name="people-outline" size={16} color="#00A86B" />
-              <Text style={styles.matchPlayers}>{match.players}</Text>
-            </View>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Komende matches</Text>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/matches', params: { tab: '2' } })}>
+            <Text style={styles.seeAllText}>Zie alle</Text>
           </TouchableOpacity>
-        ))}
+        </View>
+
+        {loadingMatches ? (
+          <ActivityIndicator size="small" color="#00A86B" style={{ marginVertical: 20 }} />
+        ) : userMatches.length === 0 ? (
+          <View style={styles.emptyMatches}>
+            <Text style={styles.emptyMatchesText}>Geen komende matches gepland.</Text>
+            <TouchableOpacity onPress={() => router.push('/(screens)/findMatch')}>
+              <Text style={styles.emptyMatchesLink}>Zoek een match</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          userMatches.map((match) => (
+            <TouchableOpacity
+              key={match.id}
+              style={styles.matchCard}
+              onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+            >
+              <View>
+                <Text style={styles.matchCourt}>{match.court}</Text>
+                <Text style={styles.matchTime}>{match.time}</Text>
+                <Text style={styles.matchSport}>{match.sport}</Text>
+              </View>
+              <View style={styles.matchRight}>
+                <Ionicons name="people-outline" size={16} color="#00A86B" />
+                <Text style={styles.matchPlayers}>{match.players}</Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
 
         <Text style={styles.sectionTitle}>Banen bij u in de buurt</Text>
         {nearbyCourts.map((court) => (
@@ -191,7 +245,12 @@ const styles = StyleSheet.create({
   quickActions: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 12, padding: 16, marginBottom: 8 },
   actionButton: { alignItems: 'center', gap: 6 },
   actionLabel: { fontSize: 11, color: '#555', fontWeight: '500' },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#333', marginHorizontal: 16, marginTop: 20, marginBottom: 10 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 16, marginTop: 20, marginBottom: 10 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#333' },
+  seeAllText: { fontSize: 13, color: '#00A86B', fontWeight: '600' },
+  emptyMatches: { backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 12, padding: 20, alignItems: 'center', gap: 8 },
+  emptyMatchesText: { fontSize: 14, color: '#999' },
+  emptyMatchesLink: { fontSize: 14, color: '#00A86B', fontWeight: '700' },
   matchCard: { backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 12, padding: 16, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   matchCourt: { fontSize: 16, fontWeight: '600', color: '#333' },
   matchTime: { fontSize: 13, color: '#999', marginTop: 2 },

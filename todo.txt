@@ -15,7 +15,7 @@
 Belangrijk ↑
 minder belangrijk ↓
 
-    Komende matches zijn hardcoded -> dynamisch uit de firebase database voor die user halen.
+    X Komende matches zijn hardcoded -> dynamisch uit de firebase database voor die user halen.
 
     Banen bij u in de buurt op homepagina moet van reserveren naar simpelweg nieuwe match op die baan gaan.
         -> betere ideeën kunnen ook idk
