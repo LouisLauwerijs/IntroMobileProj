@@ -11,8 +11,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  auth,
+  firestore,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
+} from '../../firebase';
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type ResultCourt = {
   kind: 'court';
@@ -53,25 +62,12 @@ type ResultMatch = {
 
 type SearchResult = ResultCourt | ResultPlayer | ResultMatch;
 
-const ALL_DATA: SearchResult[] = [
-  // Courts
-  { kind: 'court', id: 'c1', name: 'City Padel Club',    location: 'Antwerpen Centrum', distance: '0.5 km', pricePerHour: 18, rating: 4.8, available: 3, image: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&q=80', tags: ['Indoor', 'Lights', 'Parking'] },
-  { kind: 'court', id: 'c2', name: 'Riverside Padel',    location: 'Linkeroever',       distance: '1.2 km', pricePerHour: 14, rating: 4.5, available: 1, image: 'https://images.unsplash.com/photo-1680181864755-8f6f5537b92c?w=400&q=80', tags: ['Outdoor', 'Lights'] },
-  { kind: 'court', id: 'c3', name: 'Central Sports Hub', location: 'Berchem',           distance: '2.0 km', pricePerHour: 12, rating: 4.3, available: 5, image: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?w=400&q=80', tags: ['Indoor', 'Showers', 'Bar'] },
-  { kind: 'court', id: 'c4', name: 'Sportpark Noord',    location: 'Merksem',           distance: '3.1 km', pricePerHour: 16, rating: 4.6, available: 2, image: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&q=80', tags: ['Outdoor', 'Pro Shop'] },
-  // Players
-  { kind: 'player', id: 'p1', name: 'Sophie Van den Berg', avatar: 'https://i.pravatar.cc/100?img=5',  level: 6.5, location: 'Antwerpen', wins: 41, matches: 48 },
-  { kind: 'player', id: 'p2', name: 'Liam De Smedt',       avatar: 'https://i.pravatar.cc/100?img=12', level: 6.0, location: 'Berchem',    wins: 38, matches: 46 },
-  { kind: 'player', id: 'p3', name: 'Emma Jacobs',          avatar: 'https://i.pravatar.cc/100?img=9',  level: 5.5, location: 'Deurne',     wins: 33, matches: 42 },
-  { kind: 'player', id: 'p4', name: 'Noah Pieters',         avatar: 'https://i.pravatar.cc/100?img=15', level: 5.0, location: 'Merksem',    wins: 29, matches: 40 },
-  { kind: 'player', id: 'p5', name: 'Lars Wouters',         avatar: 'https://i.pravatar.cc/100?img=17', level: 3.5, location: 'Linkeroever',wins: 22, matches: 36 },
-  // Matches
-  { kind: 'match', id: 'm1', club: 'City Padel Club',    location: 'Antwerpen Centrum', date: 'Vandaag', time: '18:00', levelMin: 2.5, levelMax: 4.0, spots: 1, pricePerPlayer: 9 },
-  { kind: 'match', id: 'm2', club: 'Riverside Padel',    location: 'Linkeroever',       date: 'Vandaag', time: '20:00', levelMin: 1.5, levelMax: 3.0, spots: 2, pricePerPlayer: 7 },
-  { kind: 'match', id: 'm3', club: 'Central Sports Hub', location: 'Berchem',           date: 'Morgen',  time: '09:00', levelMin: 3.5, levelMax: 5.5, spots: 3, pricePerPlayer: 8 },
-];
-
 const RECENT_SEARCHES = ['City Padel', 'Lars Wouters', 'Berchem', 'Indoor'];
+
+// App data from Firestore
+const DEFAULT_COURTS: ResultCourt[] = [];
+const DEFAULT_PLAYERS: ResultPlayer[] = [];
+const DEFAULT_MATCHES: ResultMatch[] = [];
 
 // ─── Result components ────────────────────────────────────────────────────────
 
@@ -161,37 +157,104 @@ const TABS = ['Alles', 'Banen', 'Spelers', 'Wedstrijden'];
 export default function SearchScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ q?: string }>();
-  const [query, setQuery] = useState(params.q ?? '');
+  const [searchText, setSearchText] = useState(params.q ?? '');
   const [activeTab, setActiveTab] = useState('Alles');
 
-  const q = query.toLowerCase().trim();
+  const [courts, setCourts] = useState<ResultCourt[]>(DEFAULT_COURTS);
+  const [players, setPlayers] = useState<ResultPlayer[]>(DEFAULT_PLAYERS);
+  const [matches, setMatches] = useState<ResultMatch[]>(DEFAULT_MATCHES);
+  const [loading, setLoading] = useState(true);
 
-  const results = ALL_DATA.filter((item) => {
-    const textMatch = (() => {
-      if (item.kind === 'court')  return item.name.toLowerCase().includes(q) || item.location.toLowerCase().includes(q) || item.tags.some((t) => t.toLowerCase().includes(q));
-      if (item.kind === 'player') return item.name.toLowerCase().includes(q) || item.location.toLowerCase().includes(q);
-      if (item.kind === 'match')  return item.club.toLowerCase().includes(q) || item.location.toLowerCase().includes(q);
-      return false;
-    })();
+  const q = searchText.toLowerCase().trim();
 
-    const tabMatch =
-      activeTab === 'Alles' ||
-      (activeTab === 'Banen'       && item.kind === 'court') ||
-      (activeTab === 'Spelers'     && item.kind === 'player') ||
-      (activeTab === 'Wedstrijden' && item.kind === 'match');
+  useEffect(() => {
+    let unsubUsers = () => {};
+    let unsubMatches = () => {};
 
-    return textMatch && tabMatch;
+    const usersQuery = query(collection(firestore, 'users'), orderBy('name'));
+    unsubUsers = onSnapshot(usersQuery, (snapshot) => {
+      const fetchedPlayers: ResultPlayer[] = snapshot.docs.map((docSnap) => {
+        const d = docSnap.data() as any;
+        return {
+          kind: 'player',
+          id: docSnap.id,
+          name: d.name || d.username || 'Speler',
+          avatar: d.avatar || `https://i.pravatar.cc/100?img=${Math.floor(Math.random() * 70) + 1}`,
+          level: Number(d.level) || 2.5,
+          location: d.location || 'Onbekende locatie',
+          wins: Number(d.wins) || 0,
+          matches: Number(d.matches) || 0,
+        };
+      });
+      setPlayers(fetchedPlayers);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching players', error);
+      setLoading(false);
+    });
+
+    const matchesQuery = query(collection(firestore, 'matches'), orderBy('date', 'asc'));
+    unsubMatches = onSnapshot(matchesQuery, (snapshot) => {
+      const fetchedMatches: ResultMatch[] = snapshot.docs.map((docSnap) => {
+        const d = docSnap.data() as any;
+        return {
+          kind: 'match',
+          id: docSnap.id,
+          club: d.club || d.court || 'Onbekende club',
+          location: d.location || d.club || 'Onbekende locatie',
+          date: d.date || 'Onbekend',
+          time: d.time || 'Onbekend',
+          levelMin: Number(d.levelMin) || Number(d.minLevel) || 2.0,
+          levelMax: Number(d.levelMax) || Number(d.maxLevel) || 6.0,
+          spots: Number(d.spotsLeft || d.spots || 0),
+          pricePerPlayer: Number(d.pricePerPlayer || d.price || 0),
+        };
+      });
+      setMatches(fetchedMatches);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching matches', error);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubUsers();
+      unsubMatches();
+    };
+  }, []);
+
+  const courtResults = courts.filter((item) => {
+    if (!q) return true;
+    const text = `${item.name} ${item.location} ${item.tags.join(' ')}`.toLowerCase();
+    return text.includes(q);
   });
+
+  const playerResults = players.filter((item) => {
+    if (!q) return true;
+    return item.name.toLowerCase().includes(q) || item.location.toLowerCase().includes(q);
+  });
+
+  const matchResults = matches.filter((item) => {
+    if (!q) return true;
+    return item.club.toLowerCase().includes(q) || item.location.toLowerCase().includes(q);
+  });
+
+  const results: SearchResult[] = [
+    ...((activeTab === 'Alles' || activeTab === 'Banen') ? courtResults : []),
+    ...((activeTab === 'Alles' || activeTab === 'Spelers') ? playerResults : []),
+    ...((activeTab === 'Alles' || activeTab === 'Wedstrijden') ? matchResults : []),
+  ];
+
 
   const showEmpty = q.length > 0 && results.length === 0;
   const showSuggestions = q.length === 0;
 
   // Counts per tab
   const counts: Record<string, number> = {
-    Alles: ALL_DATA.filter((i) => filterByQuery(i, q)).length,
-    Banen: ALL_DATA.filter((i) => i.kind === 'court' && filterByQuery(i, q)).length,
-    Spelers: ALL_DATA.filter((i) => i.kind === 'player' && filterByQuery(i, q)).length,
-    Wedstrijden: ALL_DATA.filter((i) => i.kind === 'match' && filterByQuery(i, q)).length,
+    Alles: q ? results.length : courts.length + players.length + matches.length,
+    Banen: courtResults.length,
+    Spelers: playerResults.length,
+    Wedstrijden: matchResults.length,
   };
 
   return (
@@ -207,8 +270,8 @@ export default function SearchScreen() {
             style={styles.searchInput}
             placeholder="Zoek banen, spelers..."
             placeholderTextColor="#999"
-            value={query}
-            onChangeText={setQuery}
+            value={searchText}
+            onChangeText={setSearchText}
             autoFocus
             returnKeyType="search"
           />
