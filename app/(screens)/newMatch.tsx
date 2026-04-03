@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Redirect, useRouter, useLocalSearchParams } from 'expo-router';
 import { 
   auth, 
@@ -21,7 +21,10 @@ import {
   doc,
   getDoc,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  query,
+  where,
+  getDocs
 } from '../../firebase';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -70,20 +73,81 @@ export default function NewMatchScreen() {
   const [showClubs, setShowClubs] = useState(false);
   const [showDates, setShowDates] = useState(false);
   const [showTimes, setShowTimes] = useState(false);
+  const [bookedTimes, setBookedTimes] = useState<string[]>([]);
+
+  // Fetch already booked times for the selected club and date
+  useEffect(() => {
+    const fetchBookedTimes = async () => {
+      if (!selectedClub || !selectedDate) {
+        setBookedTimes([]);
+        return;
+      }
+      
+      try {
+        const q = query(
+          collection(firestore, 'matches'),
+          where('club', '==', selectedClub),
+          where('date', '==', selectedDate)
+        );
+        const snap = await getDocs(q);
+        const times = snap.docs.map(doc => doc.data().time);
+        setBookedTimes(times);
+      } catch (error) {
+        console.error('Error fetching booked times:', error);
+      }
+    };
+
+    fetchBookedTimes();
+  }, [selectedClub, selectedDate]);
 
   const canCreate = selectedClub && selectedDate && selectedTime && !loading;
 
+  // Filter out past times if date is today
+  const getAvailableTimes = () => {
+    if (!selectedDate) return TIMES;
+    
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    if (selectedDate === todayStr) {
+      const currentHour = today.getHours();
+      const currentMinute = today.getMinutes();
+      
+      return TIMES.filter(t => {
+        const [h, m] = t.split(':').map(Number);
+        if (h > currentHour) return true;
+        if (h === currentHour && m > currentMinute) return true;
+        return false;
+      });
+    }
+    
+    return TIMES;
+  };
+
   const handleCreate = async () => {
-    console.log('handleCreate gestart...');
     const user = auth.currentUser;
     if (!user) {
-      console.error('Geen gebruiker gevonden');
       Alert.alert('Fout', 'Je moet ingelogd zijn om een wedstrijd aan te maken.');
       return;
     }
 
     setLoading(true);
     try {
+      // 1. Check for existing booking at same time/club/date
+      const q = query(
+        collection(firestore, 'matches'),
+        where('club', '==', selectedClub),
+        where('date', '==', selectedDate),
+        where('time', '==', selectedTime)
+      );
+      
+      const existingSnap = await getDocs(q);
+      if (!existingSnap.empty) {
+        Alert.alert('Helaas', 'Dit tijdslot is al gereserveerd bij deze club. Kies een ander uur of datum.');
+        setLoading(false);
+        return;
+      }
+
       const userDoc = await getDoc(doc(firestore, 'users', user.uid));
       const userData = userDoc.exists() ? userDoc.data() : null;
 
@@ -96,7 +160,7 @@ export default function NewMatchScreen() {
         avatar: userData?.avatar || '',
       };
 
-      // Create 3 empty slots
+      // Create 3 empty slots (1 in team 1, 2 in team 2)
       const players = [
         creatorPlayer,
         { id: null, name: null, level: null, team: 1 },
@@ -113,8 +177,8 @@ export default function NewMatchScreen() {
         isMixed: isMixed,
         isCompetitive: isCompetitive,
         isPrivate: isPrivate,
-        pricePerPlayer: 10, // Hardcoded for prototype
-        distance: '2.4 km', // Hardcoded for prototype
+        pricePerPlayer: 10,
+        distance: '2.4 km',
         status: 'open',
         createdBy: user.uid,
         createdAt: serverTimestamp(),
@@ -124,27 +188,21 @@ export default function NewMatchScreen() {
 
       const docRef = await addDoc(collection(firestore, 'matches'), matchData);
       
-      // Update all-time match history for the creator
       const userRef = doc(firestore, 'users', user.uid);
       await updateDoc(userRef, {
         allTimeMatchIds: arrayUnion(docRef.id)
       }).catch(err => console.error('Error updating creator history:', err));
 
       Alert.alert('Succes', 'Je wedstrijd is aangemaakt!', [
-        { 
-          text: 'OK', 
-          onPress: () => {
-            router.back();
-          } 
-        }
+        { text: 'OK', onPress: () => router.back() }
       ]);
 
-      // Fallback voor web omdat Alert.alert callbacks soms niet vuren
       if (typeof window !== 'undefined') {
         router.back();
       }
 
     } catch (error) {
+      console.error('Create error:', error);
       Alert.alert('Fout', 'Er is iets misgegaan bij het aanmaken van de wedstrijd.');
     } finally {
       setLoading(false);
@@ -245,17 +303,42 @@ export default function NewMatchScreen() {
         </TouchableOpacity>
         {showTimes && (
           <View style={styles.timeGrid}>
-            {TIMES.map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.timeChip, selectedTime === t && styles.timeChipActive]}
-                onPress={() => { setSelectedTime(t); setShowTimes(false); }}
-              >
-                <Text style={[styles.timeChipText, selectedTime === t && styles.timeChipTextActive]}>
-                  {t}
+            {getAvailableTimes().length > 0 ? (
+              getAvailableTimes().map((t) => {
+                const isBooked = bookedTimes.includes(t);
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[
+                      styles.timeChip, 
+                      selectedTime === t && styles.timeChipActive,
+                      isBooked && { backgroundColor: '#eee', borderColor: '#ddd' }
+                    ]}
+                    onPress={() => { 
+                      if (!isBooked) {
+                        setSelectedTime(t); 
+                        setShowTimes(false); 
+                      }
+                    }}
+                    disabled={isBooked}
+                  >
+                    <Text style={[
+                      styles.timeChipText, 
+                      selectedTime === t && styles.timeChipTextActive,
+                      isBooked && { color: '#ccc' }
+                    ]}>
+                      {t}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={{ padding: 10 }}>
+                <Text style={{ color: '#999', fontSize: 13, fontStyle: 'italic' }}>
+                  Geen tijden meer beschikbaar voor vandaag.
                 </Text>
-              </TouchableOpacity>
-            ))}
+              </View>
+            )}
           </View>
         )}
 

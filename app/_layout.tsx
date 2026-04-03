@@ -14,7 +14,6 @@ export default function RootLayout() {
       <Stack.Screen name="(screens)/notifications" />
       <Stack.Screen name="(screens)/settings" />
       <Stack.Screen name="(screens)/editProfile" />
-      <Stack.Screen name="(screens)/languageSelector" />
       <Stack.Screen name="(screens)/defaultLocation" />
       <Stack.Screen name="(screens)/about" />
       <Stack.Screen name="(screens)/faq" />
