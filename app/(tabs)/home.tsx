@@ -186,9 +186,15 @@ export default function HomeScreen() {
           ))
         )}
 
-        <Text style={styles.sectionTitle}>Banen bij u in de buurt</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Banen bij u in de buurt</Text>
+        </View>
         {nearbyCourts.map((court) => (
-          <TouchableOpacity key={court.id} style={styles.courtCard} onPress={() => router.push('/book')}>
+          <TouchableOpacity 
+            key={court.id} 
+            style={styles.courtCard} 
+            onPress={() => router.push({ pathname: '/(screens)/newMatch', params: { club: court.name } })}
+          >
             <View style={styles.courtIcon}>
               <Ionicons name="tennisball-outline" size={24} color="#00A86B" />
             </View>

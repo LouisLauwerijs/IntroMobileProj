@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useRouter, useLocalSearchParams } from 'expo-router';
 import { 
   auth, 
   firestore, 
@@ -55,8 +55,9 @@ const DATES = Array.from({ length: 14 }, (_, i) => {
 
 export default function NewMatchScreen() {
   const router = useRouter();
+  const { club } = useLocalSearchParams();
 
-  const [selectedClub, setSelectedClub] = useState<string | null>(null);
+  const [selectedClub, setSelectedClub] = useState<string | null>((club as string) || null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [levelMin, setLevelMin] = useState(2.5);
