@@ -15,15 +15,15 @@
 Belangrijk ↑
 minder belangrijk ↓
 
-    X Komende matches zijn hardcoded -> dynamisch uit de firebase database voor die user halen.
+    ✓ Komende matches zijn hardcoded -> dynamisch uit de firebase database voor die user halen.
 
-    Banen bij u in de buurt op homepagina moet van reserveren naar simpelweg nieuwe match op die baan gaan.
+    ✓ Banen bij u in de buurt op homepagina moet van reserveren naar simpelweg nieuwe match op die baan gaan.
         -> betere ideeën kunnen ook idk
 
     Manier van resultaten van match ingeven implementeren
             -> "gewonnen" en "winratio" op profiel moeten hierop gebaseerd zijn
 
-    competitie -> moet ranglijst worden + hardcoded data verwijderen
+    ✓ competitie -> moet ranglijst worden + hardcoded data verwijderen
 
     Exacte kopieën van matches aanmaken onmogelijk maken
 

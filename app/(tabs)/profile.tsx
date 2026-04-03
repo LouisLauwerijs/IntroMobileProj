@@ -126,23 +126,24 @@ export default function ProfileScreen() {
 
       // Bereken wins en winRate uit alle gespeelde matches
       let totalWins = 0;
-      let totalMatches = 0;
+      let totalPlayed = 0;
 
       // Filter voor de "Recente Wedstrijden" lijst op het scherm (alleen verleden)
       const fetched = snapshot.docs
         .map(docSnap => {
           const d = docSnap.data();
           if ((d.date || '') >= today) return null;
+          if (d.status !== 'completed' && d.scoreStatus !== 'approved') return null;
 
-          totalMatches++;
+          totalPlayed++;
 
           const players = d.players || [];
           const userPlayer = players.find((p: any) => p.id === currentUser.uid);
-          const userTeam = userPlayer?.team || 1;
+          const userTeam = userPlayer?.team;
+          const winnerTeam = d.winnerTeam;
           
-          // Check if user's team won
-          if (d.won === true && userTeam === 1) totalWins++;
-          else if (d.won === false && userTeam === 2) totalWins++;
+          const userWon = (userTeam && winnerTeam) ? (userTeam === winnerTeam) : null;
+          if (userWon) totalWins++;
 
           const opponents = players
             .filter((p: any) => p.team !== userTeam)
@@ -152,8 +153,8 @@ export default function ProfileScreen() {
           const opponentText = opponents.length > 0 ? opponents.join(' & ') : 'Tegenstanders';
           
           let result: 'Win' | 'Loss' | 'Draw' = 'Draw';
-          if (d.won === true) result = 'Win';
-          else if (d.won === false) result = 'Loss';
+          if (userWon === true) result = 'Win';
+          else if (userWon === false) result = 'Loss';
 
           return {
             id: docSnap.id,
@@ -168,11 +169,11 @@ export default function ProfileScreen() {
         .slice(0, 3);
 
       // Bereken winRate
-      const calculatedWinRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
+      const calculatedWinRate = totalPlayed > 0 ? Math.round((totalWins / totalPlayed) * 100) : 0;
 
       setWins(totalWins);
       setWinRate(calculatedWinRate);
-      setTotalMatches(totalMatches);
+      setTotalMatches(totalPlayed);
       setRecentMatches(fetched);
       setLoadingMatches(false);
     }, (err) => {

@@ -166,17 +166,25 @@ export default function MatchesScreen() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetched: MyMatch[] = snapshot.docs.map((docSnap) => {
         const d = docSnap.data();
+        const players = d.players ?? [];
+        const userInMatch = players.find((p: any) => p.id === currentUser?.uid);
+        const userTeam = userInMatch?.team;
+        const winnerTeam = d.winnerTeam;
+        
+        // Calculate if the current user won
+        const won = (userTeam && winnerTeam) ? (userTeam === winnerTeam) : null;
+
         return {
           id:      docSnap.id,
           club:    d.club   ?? '',
           date:    `${d.date ?? ''}, ${d.time ?? ''}`,
           result:  d.result ?? null,
-          won:     d.won    ?? null,
+          won:     won,
           court:   d.court  ?? 'Baan 1',
           players: (d.players ?? [])
             .filter((p: any) => p.name)
-            .map((p: any) => p.name as string), // Still keeping this for simple array of names if needed elsewhere
-          playerData: (d.players ?? []).filter((p: any) => p.name), // Added for detailed rendering
+            .map((p: any) => p.name as string),
+          playerData: (d.players ?? []).filter((p: any) => p.name),
         };
       });
       setMyMatches(fetched);

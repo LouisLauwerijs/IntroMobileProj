@@ -55,6 +55,12 @@ type Match = {
   isMixed: boolean;
   isCompetitive: boolean;
   isPrivate?: boolean;
+  result?: string;
+  winnerTeam?: 1 | 2;
+  tempScore?: string;
+  tempWinnerTeam?: 1 | 2;
+  scoreStatus?: 'pending_approval' | 'approved';
+  scoreSubmittedBy?: string;
 };
 
 type JoinRequest = {
@@ -294,8 +300,20 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    const emptyIndex = match.players.findIndex(p => !p.id);
-    if (emptyIndex === -1) {
+    const players = match.players;
+    const team1Count = players.filter(p => p.team === 1 && p.id).length;
+    const team2Count = players.filter(p => p.team === 2 && p.id).length;
+
+    // Prefer team with fewer players
+    const preferredTeam = team1Count <= team2Count ? 1 : 2;
+    
+    // Find first empty slot in preferred team, if none, try the other team
+    let targetIndex = players.findIndex(p => !p.id && p.team === preferredTeam);
+    if (targetIndex === -1) {
+      targetIndex = players.findIndex(p => !p.id);
+    }
+
+    if (targetIndex === -1) {
       Alert.alert('Fout', 'Deze wedstrijd is al vol.');
       return;
     }
@@ -309,12 +327,12 @@ export default function MatchDetailScreen() {
         id: user.uid,
         name: userData?.username || user.displayName || user.email?.split('@')[0] || 'Speler',
         level: userData?.level || '?',
-        team: match.players[emptyIndex].team,
+        team: players[targetIndex].team,
         avatar: userData?.avatar || ''
       };
 
-      const updatedPlayers = [...match.players];
-      updatedPlayers[emptyIndex] = newPlayer;
+      const updatedPlayers = [...players];
+      updatedPlayers[targetIndex] = newPlayer;
 
       const matchRef = doc(firestore, 'matches', match.id);
       const isNowFull = updatedPlayers.filter(p => !p.id).length === 0;
@@ -400,6 +418,82 @@ export default function MatchDetailScreen() {
     }
   };
 
+  const handleApproveScore = async () => {
+    const user = auth.currentUser;
+    if (!user || !match) return;
+
+    setLoading(true);
+    try {
+      const matchRef = doc(firestore, 'matches', match.id);
+      const winnerTeam = match.tempWinnerTeam;
+      const finalScore = match.tempScore;
+
+      // Update match document
+      await updateDoc(matchRef, {
+        result: finalScore,
+        winnerTeam: winnerTeam,
+        scoreStatus: 'approved',
+        scoreApprovedBy: user.uid,
+        status: 'completed'
+      });
+
+      // Update player stats for all 4 players
+      for (const player of match.players) {
+        if (player.id) {
+          const userRef = doc(firestore, 'users', player.id);
+          const userDoc = await getDoc(userRef);
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const isWinner = player.team === winnerTeam;
+            
+            const currentWins = userData.wins || 0;
+            const currentLosses = userData.losses || 0;
+            const currentLevel = userData.level || 2.5;
+            
+            let newLevel = currentLevel;
+            if (match.isCompetitive) {
+              // Simple level adjustment: +0.1 for win, -0.05 for loss (capped between 1.0 and 7.0)
+              newLevel = isWinner 
+                ? Math.min(7.0, currentLevel + 0.1) 
+                : Math.max(1.0, currentLevel - 0.05);
+            }
+
+            await updateDoc(userRef, {
+              wins: isWinner ? currentWins + 1 : currentWins,
+              losses: isWinner ? currentLosses : currentLosses + 1,
+              level: newLevel
+            });
+          }
+        }
+      }
+
+      Alert.alert('Succes', 'Het resultaat is goedgekeurd en de rankings zijn bijgewerkt!');
+      fetchMatch();
+    } catch (error) {
+      console.error('Error approving score:', error);
+      Alert.alert('Fout', 'Kon het resultaat niet goedkeuren.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectScore = async () => {
+    if (!match) return;
+    try {
+      const matchRef = doc(firestore, 'matches', match.id);
+      await updateDoc(matchRef, {
+        scoreStatus: null,
+        tempScore: null,
+        tempWinnerTeam: null,
+        scoreSubmittedBy: null
+      });
+      Alert.alert('Info', 'Het resultaat is geweigerd. Er kan nu een nieuw resultaat worden ingevoerd.');
+      fetchMatch();
+    } catch (error) {
+      console.error('Error rejecting score:', error);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -414,6 +508,18 @@ export default function MatchDetailScreen() {
   const team2 = match.players.filter((p) => p.team === 2);
   const spotsLeft = match.players.filter((p) => !p.id).length;
   const isParticipant = auth.currentUser ? match.playerIds.includes(auth.currentUser.uid) : false;
+  const today = new Date().toISOString().split('T')[0];
+  const isPast = match.date <= today; // Inclusief vandaag
+
+  const userTeam = match.players.find(p => p.id === auth.currentUser?.uid)?.team;
+  const submitterTeam = match.players.find(p => p.id === match.scoreSubmittedBy)?.team;
+  
+  const opponentSubmitted = match.scoreStatus === 'pending_approval' && 
+                            match.scoreSubmittedBy !== auth.currentUser?.uid &&
+                            submitterTeam !== userTeam;
+                            
+  const youSubmitted = match.scoreStatus === 'pending_approval' && 
+                       (match.scoreSubmittedBy === auth.currentUser?.uid || submitterTeam === userTeam);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -456,6 +562,47 @@ export default function MatchDetailScreen() {
             </View>
           ))}
         </View>
+
+        {/* Result Card for Past Matches */}
+        {isPast && isParticipant && (
+          <View style={[styles.card, { borderColor: '#00A86B', borderWidth: match.scoreStatus === 'approved' ? 2 : 0 }]}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="trophy-outline" size={18} color="#00A86B" />
+              <Text style={styles.cardTitle}>Wedstrijd Resultaat</Text>
+              {match.scoreStatus === 'approved' && (
+                <View style={styles.approvedBadge}>
+                  <Text style={styles.approvedBadgeText}>BEVESTIGD</Text>
+                </View>
+              )}
+            </View>
+            
+            {match.scoreStatus === 'approved' ? (
+              <View style={styles.resultDisplay}>
+                <Text style={styles.finalScore}>{match.result}</Text>
+                <Text style={styles.winnerLabel}>
+                  Winnaar: Team {match.winnerTeam}
+                </Text>
+              </View>
+            ) : match.scoreStatus === 'pending_approval' ? (
+              <View style={styles.pendingResultDisplay}>
+                <Text style={styles.pendingScoreLabel}>Ingediende score:</Text>
+                <Text style={styles.pendingScoreValue}>{match.tempScore}</Text>
+                <Text style={styles.pendingWinnerLabel}>
+                  Aangeduide winnaar: Team {match.tempWinnerTeam}
+                </Text>
+                {youSubmitted ? (
+                  <Text style={styles.waitText}>Wachten op goedkeuring van de tegenstander...</Text>
+                ) : (
+                  <Text style={styles.actionText}>Gelieve dit resultaat te bevestigen of te weigeren.</Text>
+                )}
+              </View>
+            ) : (
+              <View style={styles.noResultDisplay}>
+                <Text style={styles.noResultText}>Er is nog geen resultaat ingevoerd voor deze wedstrijd.</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -514,64 +661,108 @@ export default function MatchDetailScreen() {
       </ScrollView>
 
       <View style={styles.cta}>
-        <TouchableOpacity 
-          style={styles.cancelBtn} 
-          onPress={() => router.back()}
-        >
-          <Text style={styles.cancelBtnText}>Terug</Text>
-        </TouchableOpacity>
-        
-        {isParticipant ? (
-          <TouchableOpacity 
-            style={[styles.confirmBtn, { backgroundColor: '#FDECEA', borderWidth: 1, borderColor: '#E53935' }]} 
-            onPress={handleLeave}
-            disabled={leaving}
-          >
-            {leaving ? (
-              <ActivityIndicator color="#E53935" size="small" />
+        {isPast && isParticipant ? (
+          <>
+            {match.scoreStatus === 'approved' ? (
+              <View style={[styles.confirmBtn, { backgroundColor: '#f0faf6', borderWidth: 1, borderColor: '#00A86B' }]}>
+                <Text style={[styles.confirmBtnText, { color: '#00A86B' }]}>Resultaat bekeken</Text>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#00A86B" />
+              </View>
+            ) : match.scoreStatus === 'pending_approval' ? (
+              opponentSubmitted ? (
+                <View style={{ flexDirection: 'row', gap: 10, flex: 1 }}>
+                  <TouchableOpacity 
+                    style={[styles.confirmBtn, { backgroundColor: '#FDECEA', borderColor: '#E53935', borderWidth: 1, flex: 1 }]} 
+                    onPress={handleRejectScore}
+                  >
+                    <Text style={[styles.confirmBtnText, { color: '#E53935' }]}>Weigeren</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.confirmBtn, { flex: 2 }]} 
+                    onPress={handleApproveScore}
+                  >
+                    <Text style={styles.confirmBtnText}>Goedkeuren</Text>
+                    <Ionicons name="checkmark-outline" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={[styles.confirmBtn, { backgroundColor: '#eee' }]}>
+                  <Text style={[styles.confirmBtnText, { color: '#999' }]}>Wachten op goedkeuring</Text>
+                  <ActivityIndicator size="small" color="#999" />
+                </View>
+              )
             ) : (
-              <>
-                <Text style={[styles.confirmBtnText, { color: '#E53935' }]}>Uitschrijven</Text>
-                <Ionicons name="exit-outline" size={18} color="#E53935" />
-              </>
+              <TouchableOpacity 
+                style={styles.confirmBtn} 
+                onPress={() => router.push({ pathname: '/(screens)/enterMatchResult', params: { id: match.id } })}
+              >
+                <Text style={styles.confirmBtnText}>Resultaat invoeren</Text>
+                <Ionicons name="add-circle-outline" size={18} color="#fff" />
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
-        ) : pendingRequest ? (
-          <TouchableOpacity 
-            style={[styles.confirmBtn, { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#F5A623' }]} 
-            onPress={handleCancelRequest}
-            disabled={joining}
-          >
-            {joining ? (
-              <ActivityIndicator color="#F5A623" size="small" />
-            ) : (
-              <>
-                <Text style={[styles.confirmBtnText, { color: '#F5A623' }]}>Intrekken</Text>
-                <Ionicons name="hourglass-outline" size={18} color="#F5A623" />
-              </>
-            )}
-          </TouchableOpacity>
+          </>
         ) : (
-          <TouchableOpacity 
-            style={[styles.confirmBtn, (spotsLeft === 0 || joining) && styles.disabledBtn]} 
-            onPress={handleJoin}
-            disabled={spotsLeft === 0 || joining}
-          >
-            {joining ? (
-              <ActivityIndicator color="#fff" size="small" />
+          <>
+            <TouchableOpacity 
+              style={styles.cancelBtn} 
+              onPress={() => router.back()}
+            >
+              <Text style={styles.cancelBtnText}>Terug</Text>
+            </TouchableOpacity>
+            
+            {isParticipant ? (
+              <TouchableOpacity 
+                style={[styles.confirmBtn, { backgroundColor: '#FDECEA', borderWidth: 1, borderColor: '#E53935' }]} 
+                onPress={handleLeave}
+                disabled={leaving}
+              >
+                {leaving ? (
+                  <ActivityIndicator color="#E53935" size="small" />
+                ) : (
+                  <>
+                    <Text style={[styles.confirmBtnText, { color: '#E53935' }]}>Uitschrijven</Text>
+                    <Ionicons name="exit-outline" size={18} color="#E53935" />
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : pendingRequest ? (
+              <TouchableOpacity 
+                style={[styles.confirmBtn, { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#F5A623' }]} 
+                onPress={handleCancelRequest}
+                disabled={joining}
+              >
+                {joining ? (
+                  <ActivityIndicator color="#F5A623" size="small" />
+                ) : (
+                  <>
+                    <Text style={[styles.confirmBtnText, { color: '#F5A623' }]}>Intrekken</Text>
+                    <Ionicons name="hourglass-outline" size={18} color="#F5A623" />
+                  </>
+                )}
+              </TouchableOpacity>
             ) : (
-              <>
-                <Text style={styles.confirmBtnText}>
-                  {match.isPrivate ? 'Aanvragen' : 'Inschrijven'}
-                </Text>
-                <Ionicons 
-                  name={match.isPrivate ? "send-outline" : "person-add-outline"} 
-                  size={18} 
-                  color="#fff" 
-                />
-              </>
+              <TouchableOpacity 
+                style={[styles.confirmBtn, (spotsLeft === 0 || joining) && styles.disabledBtn]} 
+                onPress={handleJoin}
+                disabled={spotsLeft === 0 || joining}
+              >
+                {joining ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.confirmBtnText}>
+                      {match.isPrivate ? 'Aanvragen' : 'Inschrijven'}
+                    </Text>
+                    <Ionicons 
+                      name={match.isPrivate ? "send-outline" : "person-add-outline"} 
+                      size={18} 
+                      color="#fff" 
+                    />
+                  </>
+                )}
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
+          </>
         )}
       </View>
     </SafeAreaView>
@@ -619,6 +810,22 @@ const styles = StyleSheet.create({
   dotEmpty: { backgroundColor: '#e0e0e0' },
   dotsLabel: { fontSize: 12, color: '#999', marginLeft: 4, fontWeight: '500' },
   levelText: { fontSize: 14, color: '#666', lineHeight: 20 },
+  
+  // Result styles
+  approvedBadge: { backgroundColor: '#e8f8f2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#00A86B' },
+  approvedBadgeText: { fontSize: 10, color: '#00A86B', fontWeight: '800' },
+  resultDisplay: { alignItems: 'center', paddingVertical: 10 },
+  finalScore: { fontSize: 32, fontWeight: '900', color: '#1a1a1a', letterSpacing: 2 },
+  winnerLabel: { fontSize: 14, fontWeight: '700', color: '#00A86B', marginTop: 4 },
+  pendingResultDisplay: { gap: 4 },
+  pendingScoreLabel: { fontSize: 12, color: '#999', fontWeight: '600' },
+  pendingScoreValue: { fontSize: 24, fontWeight: '800', color: '#333' },
+  pendingWinnerLabel: { fontSize: 13, fontWeight: '700', color: '#555' },
+  waitText: { fontSize: 12, color: '#F5A623', fontStyle: 'italic', marginTop: 8 },
+  actionText: { fontSize: 12, color: '#00A86B', fontWeight: '600', marginTop: 8 },
+  noResultDisplay: { paddingVertical: 10 },
+  noResultText: { fontSize: 14, color: '#999', textAlign: 'center', fontStyle: 'italic' },
+
   cta: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', flexDirection: 'row', gap: 12, padding: 16, paddingBottom: 28, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 10 },
   cancelBtn: { flex: 1, borderWidth: 1.5, borderColor: '#ddd', borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   cancelBtnText: { fontSize: 15, fontWeight: '700', color: '#999' },
