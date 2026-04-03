@@ -58,6 +58,9 @@ export default function ProfileScreen() {
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(true);
+  const [wins, setWins] = useState(0);
+  const [winRate, setWinRate] = useState(0);
+  const [totalMatches, setTotalMatches] = useState(0);
 
   // 1. Luister naar Auth status en Gebruikersgegevens
   useEffect(() => {
@@ -97,6 +100,9 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (!currentUser) {
       setRecentMatches([]);
+      setWins(0);
+      setWinRate(0);
+      setTotalMatches(0);
       setLoadingMatches(false);
       return;
     }
@@ -118,15 +124,26 @@ export default function ProfileScreen() {
         }).catch(err => console.error('Error syncing match history:', err));
       }
 
+      // Bereken wins en winRate uit alle gespeelde matches
+      let totalWins = 0;
+      let totalMatches = 0;
+
       // Filter voor de "Recente Wedstrijden" lijst op het scherm (alleen verleden)
       const fetched = snapshot.docs
         .map(docSnap => {
           const d = docSnap.data();
           if ((d.date || '') >= today) return null;
 
+          totalMatches++;
+
           const players = d.players || [];
           const userPlayer = players.find((p: any) => p.id === currentUser.uid);
           const userTeam = userPlayer?.team || 1;
+          
+          // Check if user's team won
+          if (d.won === true && userTeam === 1) totalWins++;
+          else if (d.won === false && userTeam === 2) totalWins++;
+
           const opponents = players
             .filter((p: any) => p.team !== userTeam)
             .map((p: any) => p.name)
@@ -150,6 +167,12 @@ export default function ProfileScreen() {
         .filter((m): m is RecentMatch => m !== null)
         .slice(0, 3);
 
+      // Bereken winRate
+      const calculatedWinRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
+
+      setWins(totalWins);
+      setWinRate(calculatedWinRate);
+      setTotalMatches(totalMatches);
       setRecentMatches(fetched);
       setLoadingMatches(false);
     }, (err) => {
@@ -185,9 +208,6 @@ export default function ProfileScreen() {
   const level = userData?.level || 2.5;
   const createdAt = userData?.createdAt?.toDate ? userData.createdAt.toDate() : new Date();
   const memberSince = createdAt.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
-  
-  // De teller is nu de unieke geschiedenis van alle inschrijvingen ooit
-  const totalMatchesCount = userData?.allTimeMatchIds?.length || 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -248,9 +268,9 @@ export default function ProfileScreen() {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           {[
-            { label: 'Wedstrijden', value: totalMatchesCount, icon: 'tennisball-outline' },
-            { label: 'Gewonnen',    value: 12,                icon: 'trophy-outline' },
-            { label: 'Winratio',    value: '65%',             icon: 'stats-chart-outline' },
+            { label: 'Wedstrijden', value: totalMatches,        icon: 'tennisball-outline' },
+            { label: 'Gewonnen',    value: wins,               icon: 'trophy-outline' },
+            { label: 'Winratio',    value: `${winRate}%`,      icon: 'stats-chart-outline' },
           ].map((s) => (
             <View key={s.label} style={styles.statBox}>
               <Ionicons name={s.icon as any} size={20} color="#00A86B" style={{ marginBottom: 6 }} />
