@@ -142,13 +142,22 @@ export default function TournamentsScreen() {
           });
 
           const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
-          const points = Math.round(user.level * 400 + wins * 10 + winRate * 2); // Simple points calculation
+
+          // Use chess-style Elo rating as basis (stored in user.rating in Firestore)
+          const eloBase = Number(user.rating ?? 1200);
+
+          // Calculate competition score using Elo + performance bonuses
+          //  - baseline: eloBase
+          //  - bonus from completed match performance
+          //  - small modifier uit winratio
+          const performanceBonus = Math.round(wins * 12 + winRate * 3);
+          const points = Math.round(eloBase + performanceBonus);
 
           return {
             id: user.id,
             rank: 0, // Will be calculated after sorting
             name: user.name || 'Onbekende speler',
-            level: user.level?.toFixed(1) || '2.5',
+            level: (Number(user.level) || 2.5).toFixed(1),
             wins,
             matches: totalMatches,
             winRate,
@@ -156,6 +165,7 @@ export default function TournamentsScreen() {
             avatar: (user.name || 'O')[0].toUpperCase(),
             points,
             isMe: user.id === currentUser.uid,
+            elo: eloBase,
           };
         })
       );
