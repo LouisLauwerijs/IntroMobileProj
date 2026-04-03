@@ -5,36 +5,46 @@ import {
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { 
+  firestore, 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot 
+} from '../../firebase';
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Player = {
+  id: string | null;
+  name: string | null;
+  level: string | null;
+  avatar: string | null;
+  team?: number;
+};
 
 type Match = {
   id: string;
   club: string;
-  location: string;
   date: string;
   time: string;
   levelMin: number;
   levelMax: number;
-  players: number; // out of 4
-  mixed: boolean;
-  competitive: boolean;
+  players: Player[];
+  playerIds: string[];
+  isMixed: boolean;
+  isCompetitive: boolean;
   isPrivate: boolean;
   pricePerPlayer: number;
+  distance: string;
+  status: string;
 };
-
-const ALL_MATCHES: Match[] = [
-  { id: '1', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Vandaag', time: '18:00', levelMin: 2.5, levelMax: 4.0, players: 3, mixed: false, competitive: true, isPrivate: false, pricePerPlayer: 9 },
-  { id: '2', club: 'Riverside Padel', location: 'Linkeroever', date: 'Vandaag', time: '20:00', levelMin: 1.5, levelMax: 3.0, players: 2, mixed: true, competitive: false, isPrivate: true, pricePerPlayer: 7 },
-  { id: '3', club: 'Central Sports Hub', location: 'Berchem', date: 'Morgen', time: '09:00', levelMin: 3.5, levelMax: 5.5, players: 1, mixed: false, competitive: true, isPrivate: false, pricePerPlayer: 8 },
-  { id: '4', club: 'Sportpark Noord', location: 'Merksem', date: 'Morgen', time: '11:00', levelMin: 1.0, levelMax: 2.5, players: 2, mixed: true, competitive: false, isPrivate: false, pricePerPlayer: 6 },
-  { id: '5', club: 'City Padel Club', location: 'Antwerpen Centrum', date: 'Morgen', time: '19:00', levelMin: 4.0, levelMax: 6.0, players: 3, mixed: false, competitive: true, isPrivate: true, pricePerPlayer: 9 },
-  { id: '6', club: 'Riverside Padel', location: 'Linkeroever', date: 'Za 08/03', time: '10:00', levelMin: 2.0, levelMax: 4.0, players: 1, mixed: true, competitive: true, isPrivate: false, pricePerPlayer: 7 },
-];
 
 const DATE_FILTERS = ['Alle', 'Vandaag', 'Morgen', 'Deze week'];
 const LEVEL_FILTERS = ['Alle', '1–2', '2–4', '4–6', '6–7'];
@@ -42,18 +52,23 @@ const LEVEL_FILTERS = ['Alle', '1–2', '2–4', '4–6', '6–7'];
 // ─── Match Card ───────────────────────────────────────────────────────────────
 
 function MatchCard({ match }: { match: Match }) {
-  const spots = 4 - match.players;
+  const router = useRouter();
+  const joinedCount = match.players.filter(p => p.name).length;
+  const spots = 4 - joinedCount;
   const spotsColor = spots === 1 ? '#F5A623' : '#00A86B';
 
   return (
-    <View style={styles.matchCard}>
+    <TouchableOpacity 
+      style={styles.matchCard}
+      onPress={() => router.push({ pathname: '/(screens)/matchDetail', params: { id: match.id } })}
+    >
       {/* Top row */}
       <View style={styles.matchTop}>
         <View style={{ flex: 1 }}>
           <Text style={styles.matchClub}>{match.club}</Text>
           <View style={styles.matchLocationRow}>
             <Ionicons name="location-outline" size={12} color="#999" />
-            <Text style={styles.matchLocation}>{match.location}</Text>
+            <Text style={styles.matchLocation}>{match.distance}</Text>
           </View>
         </View>
         <View style={styles.matchPrice}>
@@ -80,13 +95,13 @@ function MatchCard({ match }: { match: Match }) {
 
       {/* Tag row */}
       <View style={styles.matchTags}>
-        {match.mixed && (
+        {match.isMixed && (
           <View style={styles.tag}>
             <Ionicons name="people-outline" size={11} color="#00A86B" />
             <Text style={styles.tagText}>Gemengd</Text>
           </View>
         )}
-        {match.competitive && (
+        {match.isCompetitive && (
           <View style={styles.tag}>
             <Ionicons name="trophy-outline" size={11} color="#00A86B" />
             <Text style={styles.tagText}>Competitief</Text>
@@ -106,16 +121,16 @@ function MatchCard({ match }: { match: Match }) {
           {[0, 1, 2, 3].map((i) => (
             <View
               key={i}
-              style={[styles.dot, i < match.players ? styles.dotFilled : styles.dotEmpty]}
+              style={[styles.dot, i < joinedCount ? styles.dotFilled : styles.dotEmpty]}
             />
           ))}
-          <Text style={styles.playerCount}>{match.players}/4 spelers</Text>
+          <Text style={styles.playerCount}>{joinedCount}/4 spelers</Text>
         </View>
-        <TouchableOpacity style={styles.joinBtn}>
+        <View style={styles.joinBtn}>
           <Text style={styles.joinBtnText}>Inschrijven</Text>
-        </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -123,26 +138,82 @@ function MatchCard({ match }: { match: Match }) {
 
 export default function FindMatchScreen() {
   const router = useRouter();
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState('Alle');
   const [levelFilter, setLevelFilter] = useState('Alle');
   const [mixedOnly, setMixedOnly] = useState(false);
   const [competitiveOnly, setCompetitiveOnly] = useState(false);
   const [privateOnly, setPrivateOnly] = useState(false);
 
-  const filtered = ALL_MATCHES.filter((m) => {
-    if (dateFilter !== 'Alle' && m.date !== dateFilter) return false;
-    if (mixedOnly && !m.mixed) return false;
-    if (competitiveOnly && !m.competitive) return false;
-    if (privateOnly && !m.isPrivate) return false;
-    if (!privateOnly && m.isPrivate) return false; // By default show only public matches
-    if (levelFilter !== 'Alle') {
-      const [minStr, maxStr] = levelFilter.split('–');
-      const min = parseFloat(minStr);
-      const max = parseFloat(maxStr);
-      if (m.levelMax < min || m.levelMin > max) return false;
-    }
-    return true;
-  });
+  useEffect(() => {
+    const q = query(
+      collection(firestore, 'matches'),
+      where('status', '==', 'open'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetched = snapshot.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          club: d.club || 'Onbekende Club',
+          date: d.date || '',
+          time: d.time || '',
+          levelMin: d.levelMin || 0,
+          levelMax: d.levelMax || 7,
+          players: d.players || [],
+          playerIds: d.playerIds || [],
+          isMixed: d.isMixed || false,
+          isCompetitive: d.isCompetitive || false,
+          isPrivate: d.isPrivate || false,
+          pricePerPlayer: d.pricePerPlayer || 0,
+          distance: d.distance || '?.? km',
+          status: d.status || 'open',
+        };
+      });
+      setMatches(fetched);
+      setLoading(false);
+    }, (err) => {
+      console.error('Error fetching matches:', err);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const getFilteredMatches = () => {
+    return matches.filter((m) => {
+      // Date filter logic (simplified for prototype)
+      if (dateFilter === 'Vandaag') {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (m.date !== todayStr) return false;
+      }
+      if (dateFilter === 'Morgen') {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+        if (m.date !== tomorrowStr) return false;
+      }
+
+      if (mixedOnly && !m.isMixed) return false;
+      if (competitiveOnly && !m.isCompetitive) return false;
+      if (privateOnly && !m.isPrivate) return false;
+      if (!privateOnly && m.isPrivate) return false;
+
+      if (levelFilter !== 'Alle') {
+        const [minStr, maxStr] = levelFilter.split('–');
+        const min = parseFloat(minStr);
+        const max = parseFloat(maxStr);
+        // Overlap check
+        if (m.levelMax < min || m.levelMin > max) return false;
+      }
+      return true;
+    });
+  };
+
+  const filtered = getFilteredMatches();
 
   return (
     <SafeAreaView style={styles.container}>
