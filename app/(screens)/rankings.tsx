@@ -11,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { Avatar } from '../../components/Avatar';
 import {
   auth,
   firestore,
@@ -48,7 +50,7 @@ function Podium({ top3 }: { top3: Player[] }) {
 
   const podiumItem = (p: Player, height: number, medal: string, medalColor: string) => (
     <View style={styles.podiumItem}>
-      <Image source={{ uri: p.avatar }} style={styles.podiumAvatar} />
+      <Avatar uri={p.avatar} size={60} style={{ borderWidth: 3, borderColor: '#f5f5f5', marginBottom: 4 }} />
       <View style={[styles.medalBadge, { backgroundColor: medalColor }]}>
         <Text style={styles.medalText}>{medal}</Text>
       </View>
@@ -99,9 +101,16 @@ export default function RankingsScreen() {
     // Fetch all users
     const usersQuery = query(collection(firestore, 'users'), orderBy('level', 'desc'));
     const usersUnsubscribe = onSnapshot(usersQuery, async (usersSnapshot) => {
-      const usersData = usersSnapshot.docs.map(doc => ({
+      type UserRecord = {
+        id: string;
+        name?: string;
+        avatar?: string;
+        level?: number;
+      };
+
+      const usersData: UserRecord[] = usersSnapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data()
+        ...(doc.data() as Omit<UserRecord, 'id'>),
       }));
 
       // For each user, fetch their matches to calculate stats
@@ -123,8 +132,12 @@ export default function RankingsScreen() {
           let wins = 0;
           let totalMatches = 0;
 
-          matchesSnapshot.docs.forEach((matchDoc) => {
-            const match = matchDoc.data();
+          matchesSnapshot.docs.forEach((matchDoc: QueryDocumentSnapshot<DocumentData>) => {
+            const match = matchDoc.data() as {
+              date?: string;
+              players?: Array<{ id: string; team?: number }>;
+              won?: boolean;
+            };
             const today = new Date().toISOString().split('T')[0];
 
             // Only count completed matches (past dates)
@@ -147,7 +160,7 @@ export default function RankingsScreen() {
             id: user.id,
             rank: 0, // Will be calculated after sorting
             name: user.name || 'Onbekende speler',
-            avatar: user.avatar || 'https://i.pravatar.cc/100?img=1',
+            avatar: user.avatar || '',
             level: user.level || 2.5,
             wins,
             matches: totalMatches,
@@ -275,7 +288,7 @@ export default function RankingsScreen() {
                 </View>
 
                 {/* Avatar & Info */}
-                <Image source={{ uri: player.avatar }} style={styles.playerAvatar} />
+                <Avatar uri={player.avatar} size={42} />
                 <View style={styles.playerInfo}>
                   <Text style={[styles.playerName, isMe && styles.playerNameMe]} numberOfLines={1}>
                     {player.name}
@@ -445,7 +458,14 @@ const styles = StyleSheet.create({
 
   rankCol: { width: 32, alignItems: 'center' },
   rankTop: { fontSize: 14, fontWeight: '900' },
+  rankNum: { fontSize: 13, fontWeight: '700', color: '#bbb' },
   rankNormal: { fontSize: 13, fontWeight: '700', color: '#bbb' },
+  trendWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+
+  playerAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#eee' },
+  statsCol: { alignItems: 'center', width: 60 },
+  statNum: { fontSize: 13, fontWeight: '900', color: '#1a1a1a' },
+  statLabel: { fontSize: 10, color: '#777' },
 
   rowAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#eee' },
 

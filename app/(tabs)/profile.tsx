@@ -11,11 +11,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import { 
-  auth, 
-  firestore, 
-  doc, 
-  getDoc, 
+import { Avatar } from '../../components/Avatar';
+import {
+  auth,
+  firestore,
+  doc,
+  getDoc,
   onAuthStateChanged,
   collection,
   query,
@@ -232,13 +233,7 @@ export default function ProfileScreen() {
           activeOpacity={0.88}
         >
           <View style={styles.avatarWrapper}>
-            {avatar ? (
-              <Image source={{ uri: avatar }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
-                <Ionicons name="person" size={40} color="#ccc" />
-              </View>
-            )}
+            <Avatar uri={avatar} size={60} />
           </View>
           <View style={styles.identityInfo}>
             <Text style={styles.userName}>{name}</Text>

@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { Avatar } from '../../components/Avatar';
 import { 
   auth, 
   firestore, 
@@ -288,47 +289,69 @@ export default function EditProfileScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.7,
     });
 
-    if (!result.canceled) {
-      handleImageUpload(result.assets[0].uri);
+    if (result.canceled) {
+      return;
     }
+
+    const uri = result.assets?.[0]?.uri;
+    if (!uri) {
+      Alert.alert('Fout', 'Kon geen foto selecteren.');
+      return;
+    }
+
+    handleImageUpload(uri);
   };
 
   const handleImageUpload = async (uri: string) => {
     const user = auth.currentUser;
-    if (!user) return;
+    if (!user) {
+      Alert.alert('Fout', 'Je bent niet ingelogd.');
+      return;
+    }
 
     setUploading(true);
     try {
+      console.log('Starting upload for URI:', uri);
+
       // 1. Fetch data from URI (needed for uploadBytes)
       const response = await fetch(uri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status}`);
+      }
       const blob = await response.blob();
+      console.log('Blob size:', blob.size);
 
       // 2. Create Storage reference
       const filename = `avatars/${user.uid}_${Date.now()}.jpg`;
       const storageRef = ref(storage, filename);
+      console.log('Storage ref:', filename);
 
       // 3. Upload to Storage
       await uploadBytes(storageRef, blob);
+      console.log('Upload completed');
 
       // 4. Get Download URL
       const downloadURL = await getDownloadURL(storageRef);
+      console.log('Download URL:', downloadURL);
 
       // 5. Update local state & Firestore
       setField('avatar', downloadURL);
-      
+
       const userRef = doc(firestore, 'users', user.uid);
       await setDoc(userRef, { avatar: downloadURL }, { merge: true });
+      console.log('Firestore updated');
 
       Alert.alert('Succes', 'Profielfoto is bijgewerkt!');
     } catch (error) {
       console.error('Error uploading image:', error);
-      Alert.alert('Fout', 'Kon foto niet uploaden. Probeer het later opnieuw.');
+      const errorMessage = error instanceof Error ? error.message : 'Onbekende fout';
+      Alert.alert('Fout', `Kon foto niet uploaden: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
@@ -411,12 +434,8 @@ export default function EditProfileScreen() {
             <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
               <ActivityIndicator color="#00A86B" />
             </View>
-          ) : form.avatar ? (
-            <Image source={{ uri: form.avatar }} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
-              <Ionicons name="person" size={50} color="#ccc" />
-            </View>
+            <Avatar uri={form.avatar} size={80} />
           )}
         </View>
         <TouchableOpacity onPress={pickImage} disabled={uploading}>

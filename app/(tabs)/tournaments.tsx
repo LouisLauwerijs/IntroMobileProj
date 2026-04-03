@@ -5,6 +5,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { Avatar } from '../../components/Avatar';
 import {
   auth,
   firestore,
@@ -162,7 +163,7 @@ export default function TournamentsScreen() {
             matches: totalMatches,
             winRate,
             change: 'same' as const,
-            avatar: (user.name || 'O')[0].toUpperCase(),
+            avatar: user.avatar || '',
             points,
             isMe: user.id === currentUser.uid,
             elo: eloBase,
@@ -368,11 +369,7 @@ export default function TournamentsScreen() {
                   </View>
 
                   {/* Avatar */}
-                  <View style={[styles.rankAvatar, player.isMe && styles.rankAvatarMe]}>
-                    <Text style={[styles.rankAvatarText, player.isMe && { color: '#fff' }]}>
-                      {player.avatar}
-                    </Text>
-                  </View>
+                  <Avatar uri={player.avatar} size={38} style={player.isMe ? styles.rankAvatarMe : undefined} />
 
                   {/* Info */}
                   <View style={styles.rankInfo}>

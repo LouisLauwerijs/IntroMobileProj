@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { Avatar } from '../../components/Avatar';
 import {
   auth,
   firestore,
@@ -69,7 +70,7 @@ function ConversationItem({
 
   const hasUnread = conversation.unreadCount > 0;
   const displayName = otherUser?.name || 'Laden...';
-  const displayAvatar = otherUser?.avatar || '';
+  const displayAvatar = otherUser?.avatar;
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return '';
@@ -92,13 +93,7 @@ function ConversationItem({
       activeOpacity={0.7}
     >
       <View style={styles.conversationLeft}>
-        {displayAvatar ? (
-          <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Ionicons name="person" size={24} color="#fff" />
-          </View>
-        )}
+        <Avatar uri={otherUser?.avatar} size={48} style={{ marginRight: 12 }} />
 
         <View style={styles.conversationInfo}>
           <Text style={[styles.participantName, hasUnread && styles.participantNameUnread]}>

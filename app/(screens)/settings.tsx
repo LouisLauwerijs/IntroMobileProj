@@ -8,6 +8,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
+import { Avatar } from '../../components/Avatar';
 import { 
   auth, 
   firestore, 
@@ -233,13 +234,7 @@ export default function SettingsScreen() {
           onPress={() => router.push('/(screens)/editProfile')}
           activeOpacity={0.85}
         >
-          {avatar ? (
-            <Image source={{ uri: avatar }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, { backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' }]}>
-              <Ionicons name="person" size={24} color="#ccc" />
-            </View>
-          )}
+          <Avatar uri={avatar} size={52} />
           <View style={styles.identityInfo}>
             <Text style={styles.identityName}>{displayName}</Text>
             <Text style={styles.identityEmail}>{email}</Text>

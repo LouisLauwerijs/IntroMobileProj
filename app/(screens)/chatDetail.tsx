@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState, useRef } from 'react';
+import { Avatar } from '../../components/Avatar';
 import {
   auth,
   firestore,
@@ -211,13 +212,7 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerInfo}>
-            {otherUser?.avatar ? (
-              <Image source={{ uri: otherUser.avatar }} style={styles.headerAvatar} />
-            ) : (
-              <View style={styles.headerAvatarPlaceholder}>
-                <Ionicons name="person" size={20} color="#fff" />
-              </View>
-            )}
+            <Avatar uri={otherUser?.avatar} size={38} style={{ marginRight: 12 }} />
             <Text style={styles.headerTitle}>{otherUser?.name || 'Laden...'}</Text>
           </View>
 

@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Avatar } from '../../components/Avatar';
 import {
   auth,
   firestore,
@@ -101,7 +102,7 @@ function PlayerResult({ item }: { item: ResultPlayer }) {
   const winRate = Math.round((item.wins / item.matches) * 100);
   return (
     <TouchableOpacity style={styles.resultCard} activeOpacity={0.88}>
-      <Image source={{ uri: item.avatar }} style={styles.playerThumb} />
+      <Avatar uri={item.avatar} size={50} />
       <View style={styles.resultBody}>
         <Text style={styles.resultTitle}>{item.name}</Text>
         <View style={styles.resultMeta}>
@@ -179,7 +180,7 @@ export default function SearchScreen() {
           kind: 'player',
           id: docSnap.id,
           name: d.name || d.username || 'Speler',
-          avatar: d.avatar || `https://i.pravatar.cc/100?img=${Math.floor(Math.random() * 70) + 1}`,
+          avatar: d.avatar || '',
           level: Number(d.level) || 2.5,
           location: d.location || 'Onbekende locatie',
           wins: Number(d.wins) || 0,
@@ -275,8 +276,8 @@ export default function SearchScreen() {
             autoFocus
             returnKeyType="search"
           />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')}>
+          {q.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchText('')}>
               <Ionicons name="close-circle" size={17} color="#ccc" />
             </TouchableOpacity>
           )}

@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { Avatar } from '../../components/Avatar';
 import { 
   auth, 
   firestore, 
@@ -88,15 +89,8 @@ function PlayerTile({ player }: { player: Player }) {
         <View style={styles.emptyAvatar}>
           <Ionicons name="person-add-outline" size={22} color="#ccc" />
         </View>
-      ) : player.avatar ? (
-        <Image 
-          source={{ uri: player.avatar }} 
-          style={styles.playerAvatar} 
-        />
       ) : (
-        <View style={[styles.playerAvatar, { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' }]}>
-          <Ionicons name="person" size={24} color="#ccc" />
-        </View>
+        <Avatar uri={player.avatar} size={40} />
       )}
       <Text style={[styles.playerName, isEmpty && { color: '#bbb' }]} numberOfLines={1}>
         {isEmpty ? 'Open plek' : player.name}{isYou ? ' (jij)' : ''}
@@ -328,7 +322,7 @@ export default function MatchDetailScreen() {
         name: userData?.username || user.displayName || user.email?.split('@')[0] || 'Speler',
         level: userData?.level || '?',
         team: players[targetIndex].team,
-        avatar: userData?.avatar || ''
+        avatar: userData?.avatar || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJjbGUgY3g9IjUwIiBjeT0iNDAiIHI9IjE2IiBmaWxsPSIjY2NjIi8+CjxwYXRoIGQ9Ik0yMCA3NWMwLTEwLjUgOC41LTE5IDE5LTE5czE5IDguNSAxOSA5djE1YzAgMTAuNS04LjUgMTktMTkgMTlzLTE5LTguNS0xOS0xOVoiIGZpbGw9IiNjY2MiLz4KPC9zdmc+'
       };
 
       const updatedPlayers = [...players];
