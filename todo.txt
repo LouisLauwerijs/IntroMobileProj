@@ -1,22 +1,31 @@
 ✓ mergen
-
--| remove hardcoded data
-
+✓ tournaments worden geimplementeerd -> Kobe
+✓ profiel niet meer hardcoded
 ✓ wedstijd aanmaken -> redirect + confirmatiemelding
-
 ✓ Prive optie bij wedstrijd aanmaken
     -> enkel deelnemen via invite
-
 ✓ fix layout mathces tab
-
  reserveer baan moet dynamische data tonen - geen hardcoded bs
     -> reservatie overbodig? hetzelfde als nieuwe match maken toch.
  ✓   -> reservatie verwijderd
 
-competitie -> moet ranglijst worden + hardcoded data verwijderen
+---
 
-✓ tournaments worden geimplementeerd -> Kobe
+Belangrijk ↑
+minder belangrijk ↓
 
-✓ profiel niet meer hardcoded
+    Komende matches zijn hardcoded -> dynamisch uit de firebase database voor die user halen.
 
-Manier van resultaten van match ingeven implementeren
+    Banen bij u in de buurt op homepagina moet van reserveren naar simpelweg nieuwe match op die baan gaan.
+        -> betere ideeën kunnen ook idk
+
+    Manier van resultaten van match ingeven implementeren
+            -> "gewonnen" en "winratio" op profiel moeten hierop gebaseerd zijn
+
+    competitie -> moet ranglijst worden + hardcoded data verwijderen
+
+    Exacte kopieën van matches aanmaken onmogelijk maken
+
+    betere manier van locatie invoeren ipv string? nog niet zo belangrijk.
+
+    
